@@ -1,5 +1,6 @@
 mod token;
 mod scanner;
+mod expr;
 
 #[macro_use]
 extern crate lazy_static;
