@@ -34,9 +34,9 @@ lazy_static! {
     };
 }
 
-impl From<String> for Scanner {
-    fn from(source: String) -> Self {
-        Scanner { source: source,
+impl Scanner {
+    fn new(source: String) -> Self {
+        Scanner { source,
                   tokens: vec![],
                   start: 0,
                   current: 0,

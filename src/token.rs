@@ -16,6 +16,12 @@ pub enum TokenType {
     EOF
 }
 
+impl PartialEq for TokenType {
+    fn eq(&self, other: &Self) -> bool {
+        core::mem::discriminant(self) == core::mem::discriminant(other)
+    }
+}
+
 pub struct Token {
     pub type_token: TokenType,
     pub lexeme: String,
