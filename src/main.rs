@@ -1,7 +1,4 @@
-mod token;
-mod scanner;
-mod expr;
-mod parser;
+mod lox;
 
 #[macro_use]
 extern crate lazy_static;
@@ -11,8 +8,10 @@ use std::io::{self, BufRead, Write};
 use std::path::Path;
 use std::process::exit;
 use clap::Parser;
-use scanner::Scanner;
-use token::Token;
+use lox::error::Error;
+use lox::expr::Expr;
+use lox::token::Token;
+use lox::{parser, scanner};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -61,24 +60,20 @@ fn run_prompt() {
 }
 
 fn run(source: String) -> bool {
-    let mut scanner: Scanner = Scanner::from(source);
-    let tokens: &Vec<Token> = scanner.scan_tokens();
-
-    for token in tokens {
-        println!("{:?}", token.type_token);
+    match run_or_err(source) {
+        Ok(result) => result,
+        Err(err) => {
+            eprintln!("{}", err);
+            false
+        }
     }
-
-    true
 }
 
-fn error(line: usize, message: String) {
-    report(line, None, message);
-}
+fn run_or_err(source: String) -> Result<bool, Error> {
+    let tokens: Vec<Token> = scanner::scan_tokens(source)?;
+    let expr: Expr = parser::parse(tokens)?;
 
-fn report(line: usize, position: Option<String>, message: String) {
-    if let Some(pos) = position {
-        eprintln!("[line {}] Error {}: {}", line, pos, message);
-    } else {
-        eprintln!("[line {}] Error: {}", line, message);
-    }
+    eprintln!("{}", expr);
+
+    Ok(true)
 }

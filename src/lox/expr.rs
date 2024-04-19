@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::token::Token;
+use super::token::Token;
 
 pub enum Expr {
     Binary(Box<Expr>, Token, Box<Expr>),
@@ -10,6 +10,7 @@ pub enum Expr {
     // values held by literals.
     Atomic(Token),
     Unary(Token, Box<Expr>),
+    Ternary(Box<Expr>, Box<Expr>, Box<Expr>),
 }
 
 impl Display for Expr {
@@ -19,6 +20,7 @@ impl Display for Expr {
             Expr::Grouping(expr) => write!(f, "(group {})", format!("{}", expr)),
             Expr::Atomic(token) => write!(f, "{}", token.lexeme),
             Expr::Unary(op, expr) => write!(f, "({} {})", op.lexeme, format!("{}", expr)),
+            Expr::Ternary(guard, t, e) => write!(f, "({} ? {} : {})", guard, t, e),
         }
     }
 }

@@ -13,6 +13,8 @@ pub enum TokenType {
     And, Class, Else, False, Fun, For, If, Nil, Or,
     Print, Return, Super, This, True, Var, While,
 
+    Mark, Colon,
+
     EOF
 }
 
@@ -22,6 +24,7 @@ impl PartialEq for TokenType {
     }
 }
 
+#[derive(Clone, Debug)]
 pub struct Token {
     pub type_token: TokenType,
     pub lexeme: String,
