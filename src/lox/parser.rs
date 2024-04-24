@@ -1,4 +1,4 @@
-use super::expr::Expr;
+use super::expr::{Expr, BinaryOp, UnaryOp};
 use super::token::{Token, TokenType};
 use super::error::Error;
 
@@ -16,7 +16,7 @@ impl ParserState {
         }
     }
 
-    fn advance(&mut self) -> Token {
+    fn advance(&mut self) -> &Token {
         if !self.is_at_end() {
             self.current += 1;
         }
@@ -28,12 +28,12 @@ impl ParserState {
         self.peek().type_token == TokenType::EOF
     }
 
-    fn peek(&self) -> Token {
-        self.tokens[self.current].clone()
+    fn peek(&self) -> &Token {
+        &self.tokens[self.current]
     }
 
-    fn previous(&self) -> Token {
-        self.tokens[self.current - 1].clone()
+    fn previous(&self) -> &Token {
+        &self.tokens[self.current - 1]
     }
 }
 
@@ -60,7 +60,7 @@ fn expression(state: &mut ParserState) -> Result<Expr, Error> {
     let mut expr = ternary(state)?;
 
     while match_any_token(state, &[TokenType::Comma]) {
-        let operator = state.previous();
+        let operator: BinaryOp = state.previous().try_into()?;
         let right = ternary(state)?;
         expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
     }
@@ -85,7 +85,7 @@ fn equality(state: &mut ParserState) -> Result<Expr, Error> {
     let mut expr = comparison(state)?;
 
     while match_any_token(state, &[TokenType::BangEqual, TokenType::EqualEqual]) {
-        let operator = state.previous();
+        let operator: BinaryOp = state.previous().try_into()?;
         let right = comparison(state)?;
         expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
     }
@@ -98,7 +98,7 @@ fn comparison(state: &mut ParserState) -> Result<Expr, Error> {
 
     while match_any_token(state, &[TokenType::Greater, TokenType::GreaterEqual,
                                  TokenType::Less, TokenType::LessEqual]) {
-        let operator = state.previous();
+        let operator: BinaryOp = state.previous().try_into()?;
         let right = term(state)?;
         expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
     }
@@ -110,7 +110,7 @@ fn term(state: &mut ParserState) -> Result<Expr, Error> {
     let mut expr = factor(state)?;
 
     while match_any_token(state, &[TokenType::Minus, TokenType::Plus]) {
-        let operator = state.previous();
+        let operator: BinaryOp = state.previous().try_into()?;
         let right = factor(state)?;
         expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
     }
@@ -122,7 +122,7 @@ fn factor(state: &mut ParserState) -> Result<Expr, Error> {
     let mut expr = unary(state)?;
 
     while match_any_token(state, &[TokenType::Slash, TokenType::Star]) {
-        let operator = state.previous();
+        let operator: BinaryOp = state.previous().try_into()?;
         let right = unary(state)?;
         expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
     }
@@ -132,7 +132,7 @@ fn factor(state: &mut ParserState) -> Result<Expr, Error> {
 
 fn unary(state: &mut ParserState) -> Result<Expr, Error> {
     if match_any_token(state, &[TokenType::Bang, TokenType::Minus]) {
-        let operator = state.previous();
+        let operator: UnaryOp = state.previous().try_into()?;
         let right = unary(state)?;
         Ok(Expr::Unary(operator, Box::new(right)))
     } else {
@@ -143,7 +143,7 @@ fn unary(state: &mut ParserState) -> Result<Expr, Error> {
 fn primary(state: &mut ParserState) -> Result<Expr, Error> {
     if match_any_token(state, &[TokenType::False, TokenType::True, TokenType::Nil,
                                 TokenType::Number(0.0), TokenType::String(String::new())]) {
-        return Ok(Expr::Atomic(state.previous()));
+        return Ok(Expr::Atomic(state.previous().try_into()?));
     }
 
     if match_any_token(state, &[TokenType::LeftParen]) {
@@ -157,13 +157,17 @@ fn primary(state: &mut ParserState) -> Result<Expr, Error> {
                                 TokenType::Equal, TokenType::EqualEqual, TokenType::Greater,
                                 TokenType::GreaterEqual, TokenType::Less, TokenType::LessEqual]) {
         let error = Error::ParseError{
-            token: state.previous(),
+            token: state.previous().clone(),
             message: "Binary operator not preceded by expression".to_string()
         };
         return Err(error);
     }
 
-    Err(Error::ParseError{ token: state.peek(), message: "Expected expression".to_string() })
+    let error = Error::ParseError{
+        token: state.peek().clone(),
+        message: "Expected expression".to_string()
+    };
+    Err(error)
 }
 
 fn match_any_token(state: &mut ParserState, types: &[TokenType]) -> bool {
@@ -179,10 +183,10 @@ fn match_any_token(state: &mut ParserState, types: &[TokenType]) -> bool {
 
 fn consume(state: &mut ParserState, token_type: &TokenType, message: &str) -> Result<Token, Error> {
     if state.check(token_type) {
-        return Ok(state.advance());
+        return Ok(state.advance().clone());
     }
 
-    Err(Error::ParseError{ token: state.peek(), message: message.to_string() })
+    Err(Error::ParseError{ token: state.peek().clone(), message: message.to_string() })
 }
 
 fn synchronize(state: &mut ParserState) {
