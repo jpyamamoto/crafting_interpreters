@@ -41,9 +41,9 @@ fn run_prompt() {
     print!("> ");
     io::stdout().flush().expect("Error in REPL");
 
-    let mut stdin = io::stdin().lock().lines();
+    let stdin = io::stdin().lock().lines();
 
-    while let Some(line) = stdin.next() {
+    for line in stdin {
         let instruction = line.unwrap();
 
         if instruction.is_empty() {

@@ -4,37 +4,29 @@ use super::token::{Token, TokenType};
 
 #[derive(Debug)]
 pub enum Error {
-    ParseError { token: Token, message: String },
-    ScannerError { line: usize, message: String },
-    EvalError { message: String },
+    Parse { token: Token, message: String },
+    Scanner { line: usize, message: String },
+    Eval { message: String },
 }
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Error::ParseError { token, message } => {
-                if token.type_token == TokenType::EOF {
-                    write!(
-                        f,
-                        "[line {}] Parsing Error {}: {}",
-                        token.line,
-                        " at end".to_string(),
-                        message.to_string()
-                    )
+            Error::Parse { token, message } => {
+                if token.type_token == TokenType::Eof {
+                    write!(f, "[line {}] Parsing Error at end: {}", token.line, message)
                 } else {
                     write!(
                         f,
-                        "[line {}] Parsing Error {}: {}",
-                        token.line,
-                        format!(" at '{}'", token.lexeme),
-                        message.to_string()
+                        "[line {}] Parsing Error at '{}': {}",
+                        token.line, token.lexeme, message
                     )
                 }
             }
-            Error::ScannerError { line, message } => {
+            Error::Scanner { line, message } => {
                 write!(f, "[line {}] Lexing Error: {}", line, message)
             }
-            Error::EvalError { message } => {
+            Error::Eval { message } => {
                 write!(f, "Eval Error: {}", message)
             }
         }
@@ -44,9 +36,9 @@ impl fmt::Display for Error {
 impl error::Error for Error {
     fn description(&self) -> &str {
         match self {
-            Error::ParseError { message, .. } => &message,
-            Error::ScannerError { message, .. } => &message,
-            Error::EvalError { message, .. } => &message,
+            Error::Parse { message, .. } => message,
+            Error::Scanner { message, .. } => message,
+            Error::Eval { message, .. } => message,
         }
     }
 }

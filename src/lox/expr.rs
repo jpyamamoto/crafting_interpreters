@@ -49,16 +49,10 @@ pub enum Literal {
 impl Display for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Expr::Binary(left, op, right) => write!(
-                f,
-                "({} {} {})",
-                op,
-                format!("{}", left),
-                format!("{}", right)
-            ),
-            Expr::Grouping(expr) => write!(f, "(group {})", format!("{}", expr)),
+            Expr::Binary(left, op, right) => write!(f, "({} {} {})", op, left, right),
+            Expr::Grouping(expr) => write!(f, "(group {})", expr),
             Expr::Atomic(literal) => write!(f, "{}", literal),
-            Expr::Unary(op, expr) => write!(f, "({} {})", op, format!("{}", expr)),
+            Expr::Unary(op, expr) => write!(f, "({} {})", op, expr),
             Expr::Ternary(guard, t, e) => write!(f, "({} ? {} : {})", guard, t, e),
         }
     }
@@ -115,7 +109,7 @@ impl TryFrom<&Token> for Literal {
             TokenType::False => Ok(Literal::False),
             TokenType::True => Ok(Literal::True),
             TokenType::Nil => Ok(Literal::Nil),
-            _ => Err(Error::ParseError {
+            _ => Err(Error::Parse {
                 token: token.clone(),
                 message: "Not a literal".to_string(),
             }),
@@ -130,7 +124,7 @@ impl TryFrom<&Token> for UnaryOp {
         match token.type_token {
             TokenType::Minus => Ok(UnaryOp::Minus),
             TokenType::Bang => Ok(UnaryOp::Bang),
-            _ => Err(Error::ParseError {
+            _ => Err(Error::Parse {
                 token: token.clone(),
                 message: "Not a unary operator".to_string(),
             }),
@@ -154,7 +148,7 @@ impl TryFrom<&Token> for BinaryOp {
             TokenType::GreaterEqual => Ok(BinaryOp::GreaterEqual),
             TokenType::Less => Ok(BinaryOp::Less),
             TokenType::LessEqual => Ok(BinaryOp::LessEqual),
-            _ => Err(Error::ParseError {
+            _ => Err(Error::Parse {
                 token: token.clone(),
                 message: "Not a binary operator".to_string(),
             }),

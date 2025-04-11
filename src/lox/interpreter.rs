@@ -34,7 +34,7 @@ fn evaluate_unary(op: &UnaryOp, expr: &Expr) -> Result<Literal, Error> {
             if let Literal::Number(n) = right {
                 Ok(Literal::Number(-n))
             } else {
-                Err(Error::EvalError {
+                Err(Error::Eval {
                     message: "Invalid negation: not a number".into(),
                 })
             }
@@ -48,19 +48,19 @@ fn evaluate_binary(op: &BinaryOp, expr1: &Expr, expr2: &Expr) -> Result<Literal,
 
     match op {
         BinaryOp::Minus => {
-            let (left_num, right_num) = retrieve_nums(left, right).ok_or(Error::EvalError {
+            let (left_num, right_num) = retrieve_nums(left, right).ok_or(Error::Eval {
                 message: "Invalid subtraction: operands must be numbers".into(),
             })?;
 
             Ok(Literal::Number(left_num - right_num))
         }
         BinaryOp::Slash => {
-            let (left_num, right_num) = retrieve_nums(left, right).ok_or(Error::EvalError {
+            let (left_num, right_num) = retrieve_nums(left, right).ok_or(Error::Eval {
                 message: "Invalid division: operands must be numbers".into(),
             })?;
 
             if right_num == 0.0 {
-                Err(Error::EvalError {
+                Err(Error::Eval {
                     message: "Invalid division: division by zero".into(),
                 })
             } else {
@@ -68,7 +68,7 @@ fn evaluate_binary(op: &BinaryOp, expr1: &Expr, expr2: &Expr) -> Result<Literal,
             }
         }
         BinaryOp::Star => {
-            let (left_num, right_num) = retrieve_nums(left, right).ok_or(Error::EvalError {
+            let (left_num, right_num) = retrieve_nums(left, right).ok_or(Error::Eval {
                 message: "Invalid multiplication: operands must be numbers".into(),
             })?;
 
@@ -79,7 +79,7 @@ fn evaluate_binary(op: &BinaryOp, expr1: &Expr, expr2: &Expr) -> Result<Literal,
                 if let Literal::Number(right_num) = right {
                     Ok(Literal::Number(left_num + right_num))
                 } else {
-                    Err(Error::EvalError {
+                    Err(Error::Eval {
                         message: "Invalid addition: operands must be numbers".into(),
                     })
                 }
@@ -88,17 +88,17 @@ fn evaluate_binary(op: &BinaryOp, expr1: &Expr, expr2: &Expr) -> Result<Literal,
                 if let Literal::String(right_str) = right {
                     Ok(Literal::String(left_str + &right_str))
                 } else {
-                    Err(Error::EvalError {
+                    Err(Error::Eval {
                         message: "Invalid concatenation: operands must be strings".into(),
                     })
                 }
             }
-            _ => Err(Error::EvalError {
+            _ => Err(Error::Eval {
                 message: "Invalid addition: operands must be numbers".into(),
             }),
         },
         BinaryOp::Greater => {
-            let (left_num, right_num) = retrieve_nums(left, right).ok_or(Error::EvalError {
+            let (left_num, right_num) = retrieve_nums(left, right).ok_or(Error::Eval {
                 message: "Invalid > comparison: operands must be numbers".into(),
             })?;
 
@@ -109,7 +109,7 @@ fn evaluate_binary(op: &BinaryOp, expr1: &Expr, expr2: &Expr) -> Result<Literal,
             })
         }
         BinaryOp::GreaterEqual => {
-            let (left_num, right_num) = retrieve_nums(left, right).ok_or(Error::EvalError {
+            let (left_num, right_num) = retrieve_nums(left, right).ok_or(Error::Eval {
                 message: "Invalid >= comparison: operands must be numbers".into(),
             })?;
 
@@ -120,7 +120,7 @@ fn evaluate_binary(op: &BinaryOp, expr1: &Expr, expr2: &Expr) -> Result<Literal,
             })
         }
         BinaryOp::Less => {
-            let (left_num, right_num) = retrieve_nums(left, right).ok_or(Error::EvalError {
+            let (left_num, right_num) = retrieve_nums(left, right).ok_or(Error::Eval {
                 message: "Invalid < comparison: operands must be numbers".into(),
             })?;
 
@@ -131,7 +131,7 @@ fn evaluate_binary(op: &BinaryOp, expr1: &Expr, expr2: &Expr) -> Result<Literal,
             })
         }
         BinaryOp::LessEqual => {
-            let (left_num, right_num) = retrieve_nums(left, right).ok_or(Error::EvalError {
+            let (left_num, right_num) = retrieve_nums(left, right).ok_or(Error::Eval {
                 message: "Invalid <= comparison: operands must be numbers".into(),
             })?;
 

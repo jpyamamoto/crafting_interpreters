@@ -15,7 +15,7 @@ pub enum TokenType {
 
     Mark, Colon,
 
-    EOF
+    Eof
 }
 
 impl PartialEq for TokenType {

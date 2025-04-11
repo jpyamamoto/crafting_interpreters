@@ -1,6 +1,6 @@
-use super::expr::{Expr, BinaryOp, UnaryOp};
-use super::token::{Token, TokenType};
 use super::error::Error;
+use super::expr::{BinaryOp, Expr, UnaryOp};
+use super::token::{Token, TokenType};
 
 struct ParserState {
     tokens: Vec<Token>,
@@ -25,7 +25,7 @@ impl ParserState {
     }
 
     fn is_at_end(&self) -> bool {
-        self.peek().type_token == TokenType::EOF
+        self.peek().type_token == TokenType::Eof
     }
 
     fn peek(&self) -> &Token {
@@ -37,19 +37,19 @@ impl ParserState {
     }
 }
 
-    /*
-     * Grammar rules:
-     *
-     * expression     → ternary (, ternary)* ;
-     * ternary        → equality ? ternary : ternary | equality ;
-     * equality       → comparison ( ( "!=" | "==" ) comparison )* ;
-     * comparison     → term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
-     * term           → factor ( ( "-" | "+" ) factor )* ;
-     * factor         → unary ( ( "/" | "*" ) unary )* ;
-     * unary          → ( "!" | "-" ) unary | primary ;
-     * primary        → NUMBER | STRING | "true" | "false" | "nil" | "(" expression ")" ;
-     *
-     */
+/*
+ * Grammar rules:
+ *
+ * expression     → ternary (, ternary)* ;
+ * ternary        → equality ? ternary : ternary | equality ;
+ * equality       → comparison ( ( "!=" | "==" ) comparison )* ;
+ * comparison     → term ( ( ">" | ">=" | "<" | "<=" ) term )* ;
+ * term           → factor ( ( "-" | "+" ) factor )* ;
+ * factor         → unary ( ( "/" | "*" ) unary )* ;
+ * unary          → ( "!" | "-" ) unary | primary ;
+ * primary        → NUMBER | STRING | "true" | "false" | "nil" | "(" expression ")" ;
+ *
+ */
 
 pub fn parse(tokens: Vec<Token>) -> Result<Expr, Error> {
     let mut state = ParserState { tokens, current: 0 };
@@ -73,9 +73,17 @@ fn ternary(state: &mut ParserState) -> Result<Expr, Error> {
 
     if match_any_token(state, &[TokenType::Mark]) {
         let then_expr = ternary(state)?;
-        let _ = consume(state, &TokenType::Colon, "Expected ':' in ternary expression.");
+        let _ = consume(
+            state,
+            &TokenType::Colon,
+            "Expected ':' in ternary expression.",
+        );
         let else_expr = ternary(state)?;
-        Ok(Expr::Ternary(Box::new(expr), Box::new(then_expr), Box::new(else_expr)))
+        Ok(Expr::Ternary(
+            Box::new(expr),
+            Box::new(then_expr),
+            Box::new(else_expr),
+        ))
     } else {
         Ok(expr)
     }
@@ -96,8 +104,15 @@ fn equality(state: &mut ParserState) -> Result<Expr, Error> {
 fn comparison(state: &mut ParserState) -> Result<Expr, Error> {
     let mut expr = term(state)?;
 
-    while match_any_token(state, &[TokenType::Greater, TokenType::GreaterEqual,
-                                 TokenType::Less, TokenType::LessEqual]) {
+    while match_any_token(
+        state,
+        &[
+            TokenType::Greater,
+            TokenType::GreaterEqual,
+            TokenType::Less,
+            TokenType::LessEqual,
+        ],
+    ) {
         let operator: BinaryOp = state.previous().try_into()?;
         let right = term(state)?;
         expr = Expr::Binary(Box::new(expr), operator, Box::new(right));
@@ -141,31 +156,58 @@ fn unary(state: &mut ParserState) -> Result<Expr, Error> {
 }
 
 fn primary(state: &mut ParserState) -> Result<Expr, Error> {
-    if match_any_token(state, &[TokenType::False, TokenType::True, TokenType::Nil,
-                                TokenType::Number(0.0), TokenType::String(String::new())]) {
+    if match_any_token(
+        state,
+        &[
+            TokenType::False,
+            TokenType::True,
+            TokenType::Nil,
+            TokenType::Number(0.0),
+            TokenType::String(String::new()),
+        ],
+    ) {
         return Ok(Expr::Atomic(state.previous().try_into()?));
     }
 
     if match_any_token(state, &[TokenType::LeftParen]) {
         let expr = expression(state)?;
-        consume(state, &TokenType::RightParen, "Expect ')' after expression.")?;
+        consume(
+            state,
+            &TokenType::RightParen,
+            "Expect ')' after expression.",
+        )?;
         return Ok(Expr::Grouping(Box::new(expr)));
     }
 
-    if match_any_token(state, &[TokenType::And, TokenType::Or, TokenType::Comma, TokenType::Minus,
-                                TokenType::Plus, TokenType::Slash, TokenType::Star, TokenType::BangEqual,
-                                TokenType::Equal, TokenType::EqualEqual, TokenType::Greater,
-                                TokenType::GreaterEqual, TokenType::Less, TokenType::LessEqual]) {
-        let error = Error::ParseError{
+    if match_any_token(
+        state,
+        &[
+            TokenType::And,
+            TokenType::Or,
+            TokenType::Comma,
+            TokenType::Minus,
+            TokenType::Plus,
+            TokenType::Slash,
+            TokenType::Star,
+            TokenType::BangEqual,
+            TokenType::Equal,
+            TokenType::EqualEqual,
+            TokenType::Greater,
+            TokenType::GreaterEqual,
+            TokenType::Less,
+            TokenType::LessEqual,
+        ],
+    ) {
+        let error = Error::Parse {
             token: state.previous().clone(),
-            message: "Binary operator not preceded by expression".to_string()
+            message: "Binary operator not preceded by expression".to_string(),
         };
         return Err(error);
     }
 
-    let error = Error::ParseError{
+    let error = Error::Parse {
         token: state.peek().clone(),
-        message: "Expected expression".to_string()
+        message: "Expected expression".to_string(),
     };
     Err(error)
 }
@@ -186,7 +228,10 @@ fn consume(state: &mut ParserState, token_type: &TokenType, message: &str) -> Re
         return Ok(state.advance().clone());
     }
 
-    Err(Error::ParseError{ token: state.peek().clone(), message: message.to_string() })
+    Err(Error::Parse {
+        token: state.peek().clone(),
+        message: message.to_string(),
+    })
 }
 
 fn synchronize(state: &mut ParserState) {
@@ -199,14 +244,18 @@ fn synchronize(state: &mut ParserState) {
 
         match state.peek().type_token {
             TokenType::Class
-                | TokenType::Fun
-                | TokenType::Var
-                | TokenType::For
-                | TokenType::If
-                | TokenType::While
-                | TokenType::Print
-                | TokenType::Return => { return; }
-                _ => { state.advance(); }
+            | TokenType::Fun
+            | TokenType::Var
+            | TokenType::For
+            | TokenType::If
+            | TokenType::While
+            | TokenType::Print
+            | TokenType::Return => {
+                return;
+            }
+            _ => {
+                state.advance();
+            }
         }
     }
 }
