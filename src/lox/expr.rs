@@ -1,8 +1,8 @@
-use std::fmt::Display;
 use std::convert::TryFrom;
+use std::fmt::Display;
 
 use super::error::Error;
-use super::token::{TokenType, Token};
+use super::token::{Token, TokenType};
 
 pub enum Expr {
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
@@ -36,7 +36,7 @@ pub enum UnaryOp {
     Minus,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Literal {
     Identifier(String),
     String(String),
@@ -49,7 +49,13 @@ pub enum Literal {
 impl Display for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Expr::Binary(left, op, right) => write!(f, "({} {} {})", op, format!("{}", left), format!("{}", right)),
+            Expr::Binary(left, op, right) => write!(
+                f,
+                "({} {} {})",
+                op,
+                format!("{}", left),
+                format!("{}", right)
+            ),
             Expr::Grouping(expr) => write!(f, "(group {})", format!("{}", expr)),
             Expr::Atomic(literal) => write!(f, "{}", literal),
             Expr::Unary(op, expr) => write!(f, "({} {})", op, format!("{}", expr)),
@@ -109,7 +115,10 @@ impl TryFrom<&Token> for Literal {
             TokenType::False => Ok(Literal::False),
             TokenType::True => Ok(Literal::True),
             TokenType::Nil => Ok(Literal::Nil),
-            _ => Err(Error::ParseError { token: token.clone(), message: "Not a literal".to_string() })
+            _ => Err(Error::ParseError {
+                token: token.clone(),
+                message: "Not a literal".to_string(),
+            }),
         }
     }
 }
@@ -121,7 +130,10 @@ impl TryFrom<&Token> for UnaryOp {
         match token.type_token {
             TokenType::Minus => Ok(UnaryOp::Minus),
             TokenType::Bang => Ok(UnaryOp::Bang),
-            _ => Err(Error::ParseError { token: token.clone(), message: "Not a unary operator".to_string() })
+            _ => Err(Error::ParseError {
+                token: token.clone(),
+                message: "Not a unary operator".to_string(),
+            }),
         }
     }
 }
@@ -142,28 +154,30 @@ impl TryFrom<&Token> for BinaryOp {
             TokenType::GreaterEqual => Ok(BinaryOp::GreaterEqual),
             TokenType::Less => Ok(BinaryOp::Less),
             TokenType::LessEqual => Ok(BinaryOp::LessEqual),
-            _ => Err(Error::ParseError { token: token.clone(), message: "Not a binary operator".to_string() })
+            _ => Err(Error::ParseError {
+                token: token.clone(),
+                message: "Not a binary operator".to_string(),
+            }),
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::lox::expr::{Expr, UnaryOp, BinaryOp, Literal};
+    use crate::lox::expr::{BinaryOp, Expr, Literal, UnaryOp};
 
     #[test]
     fn display_expr() {
         let expr = Expr::Binary(
             Box::new(Expr::Unary(
                 UnaryOp::Minus,
-                Box::new(Expr::Atomic(
-                    Literal::Number(123.0))))),
-
+                Box::new(Expr::Atomic(Literal::Number(123.0))),
+            )),
             BinaryOp::Star,
-
-            Box::new(Expr::Grouping(
-                Box::new(Expr::Atomic(
-                    Literal::Number(45.67))))));
+            Box::new(Expr::Grouping(Box::new(Expr::Atomic(Literal::Number(
+                45.67,
+            ))))),
+        );
 
         assert_eq!(format!("{}", expr), "(* (- 123) (group 45.67))");
     }

@@ -3,20 +3,20 @@ mod lox;
 #[macro_use]
 extern crate lazy_static;
 
+use clap::Parser;
+use lox::error::Error;
+use lox::expr::{Expr, Literal};
+use lox::token::Token;
+use lox::{interpreter, parser, scanner};
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::Path;
 use std::process::exit;
-use clap::Parser;
-use lox::error::Error;
-use lox::expr::Expr;
-use lox::token::Token;
-use lox::{parser, scanner};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
-   file_path: Option<String>,
+    file_path: Option<String>,
 }
 
 fn main() {
@@ -72,8 +72,9 @@ fn run(source: String) -> bool {
 fn run_or_err(source: String) -> Result<bool, Error> {
     let tokens: Vec<Token> = scanner::scan_tokens(source)?;
     let expr: Expr = parser::parse(tokens)?;
+    let result: Literal = interpreter::interpret(&expr)?;
 
-    eprintln!("{}", expr);
+    eprintln!("{}", result);
 
     Ok(true)
 }
