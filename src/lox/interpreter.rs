@@ -1,17 +1,60 @@
+use super::environment::Environment;
 use super::error::Error;
 use super::expr::{BinaryOp, Expr, Literal, UnaryOp};
+use super::stmt::Stmt;
+use super::token::Token;
 
-pub fn interpret(expr: &Expr) -> Result<Literal, Error> {
-    evaluate(expr)
+pub fn interpret(statements: Vec<Stmt>) -> Result<(), Error> {
+    let mut env = Environment::new();
+
+    for statement in statements {
+        execute(&statement, &mut env)?;
+    }
+
+    Ok(())
 }
 
-fn evaluate(expr: &Expr) -> Result<Literal, Error> {
+fn execute(statement: &Stmt, env: &mut Environment) -> Result<(), Error> {
+    match statement {
+        Stmt::Expr(expr) => {
+            evaluate(expr, env)?;
+        }
+        Stmt::Print(expr) => {
+            let value = evaluate(expr, env)?;
+            println!("{}", value);
+        }
+        Stmt::Var(token, None) => {
+            env.define(token, &Literal::Nil);
+        }
+        Stmt::Var(token, Some(expr)) => {
+            let value = evaluate(expr, env)?;
+            env.define(token, &value);
+        }
+        Stmt::Block(statements) => execute_block(statements, env)?,
+    }
+
+    Ok(())
+}
+
+fn execute_block(statements: &Vec<Stmt>, env: &Environment) -> Result<(), Error> {
+    let mut block_env = env.clone().new_child();
+
+    for stmt in statements {
+        execute(stmt, &mut block_env)?;
+    }
+
+    Ok(())
+}
+
+fn evaluate(expr: &Expr, env: &mut Environment) -> Result<Literal, Error> {
     match expr {
         Expr::Atomic(literal) => evaluate_literal(literal),
-        Expr::Unary(op, expr) => evaluate_unary(op, expr),
-        Expr::Binary(expr1, op, expr2) => evaluate_binary(op, expr1, expr2),
-        Expr::Ternary(expr1, expr2, expr3) => evaluate_ternary(expr1, expr2, expr3),
-        Expr::Grouping(expr) => evaluate(expr),
+        Expr::Unary(op, expr) => evaluate_unary(op, expr, env),
+        Expr::Binary(expr1, op, expr2) => evaluate_binary(op, expr1, expr2, env),
+        Expr::Ternary(expr1, expr2, expr3) => evaluate_ternary(expr1, expr2, expr3, env),
+        Expr::Grouping(expr) => evaluate(expr, env),
+        Expr::Variable(token) => env.get(token),
+        Expr::Assign(token, expr) => evaluate_assign(token, expr, env),
     }
 }
 
@@ -19,8 +62,8 @@ fn evaluate_literal(literal: &Literal) -> Result<Literal, Error> {
     Ok(literal.to_owned())
 }
 
-fn evaluate_unary(op: &UnaryOp, expr: &Expr) -> Result<Literal, Error> {
-    let right: Literal = evaluate(expr)?;
+fn evaluate_unary(op: &UnaryOp, expr: &Expr, env: &mut Environment) -> Result<Literal, Error> {
+    let right: Literal = evaluate(expr, env)?;
 
     match op {
         UnaryOp::Bang => {
@@ -42,9 +85,14 @@ fn evaluate_unary(op: &UnaryOp, expr: &Expr) -> Result<Literal, Error> {
     }
 }
 
-fn evaluate_binary(op: &BinaryOp, expr1: &Expr, expr2: &Expr) -> Result<Literal, Error> {
-    let left: Literal = evaluate(expr1)?;
-    let right: Literal = evaluate(expr2)?;
+fn evaluate_binary(
+    op: &BinaryOp,
+    expr1: &Expr,
+    expr2: &Expr,
+    env: &mut Environment,
+) -> Result<Literal, Error> {
+    let left: Literal = evaluate(expr1, env)?;
+    let right: Literal = evaluate(expr2, env)?;
 
     match op {
         BinaryOp::Minus => {
@@ -155,14 +203,25 @@ fn evaluate_binary(op: &BinaryOp, expr1: &Expr, expr2: &Expr) -> Result<Literal,
     }
 }
 
-fn evaluate_ternary(expr1: &Expr, expr2: &Expr, expr3: &Expr) -> Result<Literal, Error> {
-    let guard: Literal = evaluate(expr1)?;
+fn evaluate_ternary(
+    expr1: &Expr,
+    expr2: &Expr,
+    expr3: &Expr,
+    env: &mut Environment,
+) -> Result<Literal, Error> {
+    let guard: Literal = evaluate(expr1, env)?;
 
     if is_truthy(guard) {
-        evaluate(expr2)
+        evaluate(expr2, env)
     } else {
-        evaluate(expr3)
+        evaluate(expr3, env)
     }
+}
+
+fn evaluate_assign(token: &Token, expr: &Expr, env: &mut Environment) -> Result<Literal, Error> {
+    let value = evaluate(expr, env)?;
+    env.assign(token, &value)?;
+    Ok(value)
 }
 
 fn is_truthy(expr: Literal) -> bool {

@@ -5,7 +5,7 @@ extern crate lazy_static;
 
 use clap::Parser;
 use lox::error::Error;
-use lox::expr::{Expr, Literal};
+use lox::stmt::Stmt;
 use lox::token::Token;
 use lox::{interpreter, parser, scanner};
 use std::fs;
@@ -71,10 +71,9 @@ fn run(source: String) -> bool {
 
 fn run_or_err(source: String) -> Result<bool, Error> {
     let tokens: Vec<Token> = scanner::scan_tokens(source)?;
-    let expr: Expr = parser::parse(tokens)?;
-    let result: Literal = interpreter::interpret(&expr)?;
+    let statements: Vec<Stmt> = parser::parse(tokens)?;
 
-    eprintln!("{}", result);
+    interpreter::interpret(statements)?;
 
     Ok(true)
 }

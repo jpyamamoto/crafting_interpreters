@@ -1,5 +1,6 @@
 use super::error::Error;
 use super::expr::{BinaryOp, Expr, UnaryOp};
+use super::stmt::Stmt;
 use super::token::{Token, TokenType};
 
 struct ParserState {
@@ -51,13 +52,107 @@ impl ParserState {
  *
  */
 
-pub fn parse(tokens: Vec<Token>) -> Result<Expr, Error> {
+pub fn parse(tokens: Vec<Token>) -> Result<Vec<Stmt>, Error> {
+    let mut statements: Vec<Stmt> = vec![];
     let mut state = ParserState { tokens, current: 0 };
-    expression(&mut state)
+
+    while !state.is_at_end() {
+        let decl = declaration(&mut state)?;
+
+        if let Some(declaration) = decl {
+            statements.push(declaration)
+        }
+    }
+
+    Ok(statements)
+}
+
+fn declaration(state: &mut ParserState) -> Result<Option<Stmt>, Error> {
+    if match_any_token(state, &[TokenType::Var]) {
+        var_declaration(state).map(Stmt::into)
+    } else {
+        statement(state).map(Stmt::into)
+    }
+    .or_else(|err| match err {
+        Error::Parse { .. } => {
+            synchronize(state);
+            Ok(None)
+        }
+        _ => Err(err),
+    })
+}
+
+fn var_declaration(state: &mut ParserState) -> Result<Stmt, Error> {
+    let name: Token = consume(
+        state,
+        &TokenType::Identifier("".to_string()),
+        "Expect variable name.",
+    )?;
+
+    let initializer = if match_any_token(state, &[TokenType::Equal]) {
+        let expr = expression(state)?;
+        Some(Box::new(expr))
+    } else {
+        None
+    };
+
+    consume(
+        state,
+        &TokenType::Semicolon,
+        "Expect ';' after variable declaration.",
+    )?;
+
+    Ok(Stmt::Var(name, initializer))
+}
+
+fn statement(state: &mut ParserState) -> Result<Stmt, Error> {
+    if match_any_token(state, &[TokenType::Print]) {
+        print_statement(state)
+    } else if match_any_token(state, &[TokenType::LeftBrace]) {
+        let block = block(state)?;
+        Ok(Stmt::Block(block))
+    } else {
+        expression_statement(state)
+    }
+}
+
+fn block(state: &mut ParserState) -> Result<Vec<Stmt>, Error> {
+    let mut statements: Vec<Stmt> = vec![];
+
+    while !state.check(&TokenType::RightBrace) && !state.is_at_end() {
+        let decl = declaration(state)?;
+
+        if let Some(valid_decl) = decl {
+            statements.push(valid_decl);
+        }
+    }
+
+    consume(state, &TokenType::RightBrace, "Expect '}' after block.")?;
+    Ok(statements)
+}
+
+fn print_statement(state: &mut ParserState) -> Result<Stmt, Error> {
+    let value: Expr = expression(state)?;
+
+    consume(state, &TokenType::Semicolon, "Expect ';' after value.")?;
+
+    Ok(Stmt::Print(Box::new(value)))
+}
+
+fn expression_statement(state: &mut ParserState) -> Result<Stmt, Error> {
+    let expr: Expr = expression(state)?;
+
+    consume(state, &TokenType::Semicolon, "Expect ';' after expression.")?;
+
+    Ok(Stmt::Expr(Box::new(expr)))
 }
 
 fn expression(state: &mut ParserState) -> Result<Expr, Error> {
-    let mut expr = ternary(state)?;
+    comma(state)
+}
+
+fn comma(state: &mut ParserState) -> Result<Expr, Error> {
+    let mut expr = assignment(state)?;
 
     while match_any_token(state, &[TokenType::Comma]) {
         let operator: BinaryOp = state.previous().try_into()?;
@@ -66,6 +161,26 @@ fn expression(state: &mut ParserState) -> Result<Expr, Error> {
     }
 
     Ok(expr)
+}
+
+fn assignment(state: &mut ParserState) -> Result<Expr, Error> {
+    let expr = ternary(state)?;
+
+    if match_any_token(state, &[TokenType::Equal]) {
+        let equals = state.previous().to_owned();
+        let value = assignment(state)?;
+
+        if let Expr::Variable(token) = expr {
+            return Ok(Expr::Assign(token, Box::new(value)));
+        }
+
+        Err(Error::Assignment {
+            token: equals,
+            message: "Invalid assignment target.".to_string(),
+        })
+    } else {
+        Ok(expr)
+    }
 }
 
 fn ternary(state: &mut ParserState) -> Result<Expr, Error> {
@@ -167,6 +282,11 @@ fn primary(state: &mut ParserState) -> Result<Expr, Error> {
         ],
     ) {
         return Ok(Expr::Atomic(state.previous().try_into()?));
+    }
+
+    if match_any_token(state, &[TokenType::Identifier("".to_string())]) {
+        let name = state.previous().to_owned();
+        return Ok(Expr::Variable(name));
     }
 
     if match_any_token(state, &[TokenType::LeftParen]) {

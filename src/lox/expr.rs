@@ -13,6 +13,10 @@ pub enum Expr {
     Atomic(Literal),
     Unary(UnaryOp, Box<Expr>),
     Ternary(Box<Expr>, Box<Expr>, Box<Expr>),
+
+    Variable(Token),
+
+    Assign(Token, Box<Expr>),
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -54,6 +58,8 @@ impl Display for Expr {
             Expr::Atomic(literal) => write!(f, "{}", literal),
             Expr::Unary(op, expr) => write!(f, "({} {})", op, expr),
             Expr::Ternary(guard, t, e) => write!(f, "({} ? {} : {})", guard, t, e),
+            Expr::Variable(token) => write!(f, "{}", token.lexeme),
+            Expr::Assign(token, expr) => write!(f, "{} = {}", token.lexeme, expr),
         }
     }
 }
