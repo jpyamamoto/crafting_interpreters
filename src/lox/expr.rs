@@ -11,11 +11,11 @@ pub enum Expr {
     // Analog to Literal, since we're not using a separate type to represent the
     // values held by literals.
     Atomic(Literal),
+    Logical(Box<Expr>, LogicalOp, Box<Expr>),
     Unary(UnaryOp, Box<Expr>),
     Ternary(Box<Expr>, Box<Expr>, Box<Expr>),
 
     Variable(Token),
-
     Assign(Token, Box<Expr>),
 }
 
@@ -32,6 +32,12 @@ pub enum BinaryOp {
     Plus,
     Slash,
     Star,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum LogicalOp {
+    Or,
+    And,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -60,6 +66,7 @@ impl Display for Expr {
             Expr::Ternary(guard, t, e) => write!(f, "({} ? {} : {})", guard, t, e),
             Expr::Variable(token) => write!(f, "{}", token.lexeme),
             Expr::Assign(token, expr) => write!(f, "{} = {}", token.lexeme, expr),
+            Expr::Logical(left, op, right) => write!(f, "{} {} {}", left, op, right),
         }
     }
 }
@@ -87,6 +94,15 @@ impl Display for UnaryOp {
         match self {
             UnaryOp::Bang => write!(f, "!"),
             UnaryOp::Minus => write!(f, "-"),
+        }
+    }
+}
+
+impl Display for LogicalOp {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LogicalOp::And => write!(f, "and"),
+            LogicalOp::Or => write!(f, "or"),
         }
     }
 }
@@ -157,6 +173,21 @@ impl TryFrom<&Token> for BinaryOp {
             _ => Err(Error::Parse {
                 token: token.clone(),
                 message: "Not a binary operator".to_string(),
+            }),
+        }
+    }
+}
+
+impl TryFrom<&Token> for LogicalOp {
+    type Error = Error;
+
+    fn try_from(token: &Token) -> Result<Self, Self::Error> {
+        match token.type_token {
+            TokenType::And => Ok(LogicalOp::And),
+            TokenType::Or => Ok(LogicalOp::Or),
+            _ => Err(Error::Parse {
+                token: token.clone(),
+                message: "Not a logical operator".to_string(),
             }),
         }
     }

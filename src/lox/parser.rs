@@ -1,5 +1,5 @@
 use super::error::Error;
-use super::expr::{BinaryOp, Expr, UnaryOp};
+use super::expr::{BinaryOp, Expr, Literal, UnaryOp};
 use super::stmt::Stmt;
 use super::token::{Token, TokenType};
 
@@ -106,14 +106,104 @@ fn var_declaration(state: &mut ParserState) -> Result<Stmt, Error> {
 }
 
 fn statement(state: &mut ParserState) -> Result<Stmt, Error> {
-    if match_any_token(state, &[TokenType::Print]) {
+    if match_any_token(state, &[TokenType::For]) {
+        for_statement(state)
+    } else if match_any_token(state, &[TokenType::If]) {
+        if_statement(state)
+    } else if match_any_token(state, &[TokenType::Print]) {
         print_statement(state)
+    } else if match_any_token(state, &[TokenType::While]) {
+        while_statement(state)
     } else if match_any_token(state, &[TokenType::LeftBrace]) {
         let block = block(state)?;
         Ok(Stmt::Block(block))
     } else {
         expression_statement(state)
     }
+}
+
+fn while_statement(state: &mut ParserState) -> Result<Stmt, Error> {
+    consume(state, &TokenType::LeftParen, "Expect '(' after while.")?;
+    let condition = expression(state)?;
+
+    consume(state, &TokenType::RightParen, "Expect ')' after condition.")?;
+    let body = statement(state)?;
+
+    Ok(Stmt::While(Box::new(condition), Box::new(body)))
+}
+
+fn for_statement(state: &mut ParserState) -> Result<Stmt, Error> {
+    consume(state, &TokenType::LeftParen, "Expect '(' after 'for'.")?;
+
+    let initializer = if match_any_token(state, &[TokenType::Semicolon]) {
+        None
+    } else if match_any_token(state, &[TokenType::Var]) {
+        Some(var_declaration(state)?)
+    } else {
+        Some(expression_statement(state)?)
+    };
+
+    let condition = if !state.check(&TokenType::Semicolon) {
+        expression(state)?
+    } else {
+        Expr::Atomic(Literal::True)
+    };
+
+    consume(
+        state,
+        &TokenType::Semicolon,
+        "Expect ';' after loop condition.",
+    )?;
+
+    let increment = if !state.check(&TokenType::RightParen) {
+        Some(expression(state)?)
+    } else {
+        None
+    };
+
+    consume(
+        state,
+        &TokenType::RightParen,
+        "Expect ')' after for clauses.",
+    )?;
+
+    let mut body = statement(state)?;
+
+    if let Some(increment_expr) = increment {
+        body = Stmt::Block(vec![body, Stmt::Expr(Box::new(increment_expr))]);
+    }
+
+    body = Stmt::While(Box::new(condition), Box::new(body));
+
+    if let Some(initializer_stmt) = initializer {
+        body = Stmt::Block(vec![initializer_stmt, body]);
+    }
+
+    Ok(body)
+}
+
+fn if_statement(state: &mut ParserState) -> Result<Stmt, Error> {
+    consume(state, &TokenType::LeftParen, "Expect '(' after 'if'.")?;
+    let condition = expression(state)?;
+    consume(
+        state,
+        &TokenType::RightParen,
+        "Expect ')' after 'if' condition.",
+    )?;
+
+    let then_branch = statement(state)?;
+    let else_branch = if match_any_token(state, &[TokenType::Else]) {
+        let stmt = statement(state)?;
+        Some(Box::new(stmt))
+    } else {
+        None
+    };
+
+    Ok(Stmt::If(
+        Box::new(condition),
+        Box::new(then_branch),
+        else_branch,
+    ))
 }
 
 fn block(state: &mut ParserState) -> Result<Vec<Stmt>, Error> {
@@ -184,7 +274,7 @@ fn assignment(state: &mut ParserState) -> Result<Expr, Error> {
 }
 
 fn ternary(state: &mut ParserState) -> Result<Expr, Error> {
-    let expr = equality(state)?;
+    let expr = or(state)?;
 
     if match_any_token(state, &[TokenType::Mark]) {
         let then_expr = ternary(state)?;
@@ -202,6 +292,30 @@ fn ternary(state: &mut ParserState) -> Result<Expr, Error> {
     } else {
         Ok(expr)
     }
+}
+
+fn or(state: &mut ParserState) -> Result<Expr, Error> {
+    let mut expr = and(state)?;
+
+    while match_any_token(state, &[TokenType::Or]) {
+        let operator = state.previous().try_into()?;
+        let right = and(state)?;
+        expr = Expr::Logical(Box::new(expr), operator, Box::new(right));
+    }
+
+    Ok(expr)
+}
+
+fn and(state: &mut ParserState) -> Result<Expr, Error> {
+    let mut expr = equality(state)?;
+
+    while match_any_token(state, &[TokenType::And]) {
+        let operator = state.previous().try_into()?;
+        let right = equality(state)?;
+        expr = Expr::Logical(Box::new(expr), operator, Box::new(right));
+    }
+
+    Ok(expr)
 }
 
 fn equality(state: &mut ParserState) -> Result<Expr, Error> {

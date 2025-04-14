@@ -1,6 +1,6 @@
 use super::environment::Environment;
 use super::error::Error;
-use super::expr::{BinaryOp, Expr, Literal, UnaryOp};
+use super::expr::{BinaryOp, Expr, Literal, LogicalOp, UnaryOp};
 use super::stmt::Stmt;
 use super::token::Token;
 
@@ -31,16 +31,10 @@ fn execute(statement: &Stmt, env: &mut Environment) -> Result<(), Error> {
             env.define(token, &value);
         }
         Stmt::Block(statements) => execute_block(statements, env)?,
-    }
-
-    Ok(())
-}
-
-fn execute_block(statements: &Vec<Stmt>, env: &Environment) -> Result<(), Error> {
-    let mut block_env = env.clone().new_child();
-
-    for stmt in statements {
-        execute(stmt, &mut block_env)?;
+        Stmt::If(condition, then_branch, else_branch) => {
+            execute_if(condition, then_branch, else_branch, env)?
+        }
+        Stmt::While(condition, body) => execute_while(condition, body, env)?,
     }
 
     Ok(())
@@ -55,6 +49,7 @@ fn evaluate(expr: &Expr, env: &mut Environment) -> Result<Literal, Error> {
         Expr::Grouping(expr) => evaluate(expr, env),
         Expr::Variable(token) => env.get(token),
         Expr::Assign(token, expr) => evaluate_assign(token, expr, env),
+        Expr::Logical(expr1, op, expr2) => evaluate_logical(op, expr1, expr2, env),
     }
 }
 
@@ -67,7 +62,7 @@ fn evaluate_unary(op: &UnaryOp, expr: &Expr, env: &mut Environment) -> Result<Li
 
     match op {
         UnaryOp::Bang => {
-            if is_truthy(right) {
+            if is_truthy(&right) {
                 Ok(Literal::False)
             } else {
                 Ok(Literal::True)
@@ -211,7 +206,7 @@ fn evaluate_ternary(
 ) -> Result<Literal, Error> {
     let guard: Literal = evaluate(expr1, env)?;
 
-    if is_truthy(guard) {
+    if is_truthy(&guard) {
         evaluate(expr2, env)
     } else {
         evaluate(expr3, env)
@@ -224,7 +219,69 @@ fn evaluate_assign(token: &Token, expr: &Expr, env: &mut Environment) -> Result<
     Ok(value)
 }
 
-fn is_truthy(expr: Literal) -> bool {
+fn evaluate_logical(
+    op: &LogicalOp,
+    expr1: &Expr,
+    expr2: &Expr,
+    env: &mut Environment,
+) -> Result<Literal, Error> {
+    let left = evaluate(expr1, env)?;
+
+    match op {
+        LogicalOp::Or => {
+            if is_truthy(&left) {
+                Ok(left)
+            } else {
+                evaluate(expr2, env)
+            }
+        }
+        LogicalOp::And => {
+            if !is_truthy(&left) {
+                Ok(left)
+            } else {
+                evaluate(expr2, env)
+            }
+        }
+    }
+}
+
+fn execute_if(
+    condition: &Expr,
+    then_branch: &Stmt,
+    else_branch: &Option<Box<Stmt>>,
+    env: &mut Environment,
+) -> Result<(), Error> {
+    let guard = evaluate(condition, env)?;
+
+    if is_truthy(&guard) {
+        execute(then_branch, env)
+    } else {
+        match else_branch {
+            Some(else_stmt) => execute(else_stmt, env),
+            None => Ok(()),
+        }
+    }
+}
+
+fn execute_block(statements: &Vec<Stmt>, env: &mut Environment) -> Result<(), Error> {
+    let mut block_env = Environment::new_child(env);
+
+    for stmt in statements {
+        execute(stmt, &mut block_env)?;
+    }
+
+    Ok(())
+}
+
+fn execute_while(condition: &Expr, body: &Stmt, env: &mut Environment) -> Result<(), Error> {
+    while is_truthy(&evaluate(condition, env)?) {
+        execute(body, env)?;
+    }
+
+    Ok(())
+}
+
+fn is_truthy(expr: &Literal) -> bool {
     !matches!(expr, Literal::Nil | Literal::False)
 }
 
