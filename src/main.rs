@@ -72,7 +72,6 @@ fn run(source: String) -> bool {
 fn run_or_err(source: String) -> Result<bool, Error> {
     let tokens: Vec<Token> = scanner::scan_tokens(source)?;
     let statements: Vec<Stmt> = parser::parse(tokens)?;
-    println!("{:?}", statements);
 
     interpreter::interpret(statements)?;
 

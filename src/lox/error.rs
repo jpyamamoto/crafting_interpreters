@@ -5,9 +5,9 @@ use super::token::{Token, TokenType};
 #[derive(Debug)]
 pub enum Error {
     Parse { token: Token, message: String },
-    Assignment { token: Token, message: String },
+    Report { token: Token, message: String },
     Scanner { line: usize, message: String },
-    Eval { message: String },
+    Eval { token: Token, message: String },
 }
 
 impl fmt::Display for Error {
@@ -24,7 +24,7 @@ impl fmt::Display for Error {
                     )
                 }
             }
-            Error::Assignment { token, message } => {
+            Error::Report { token, message } => {
                 if token.type_token == TokenType::Eof {
                     write!(f, "[line {}] Parsing Error at end: {}", token.line, message)
                 } else {
@@ -38,8 +38,8 @@ impl fmt::Display for Error {
             Error::Scanner { line, message } => {
                 write!(f, "[line {}] Lexing Error: {}", line, message)
             }
-            Error::Eval { message } => {
-                write!(f, "Eval Error: {}", message)
+            Error::Eval { token, message } => {
+                write!(f, "[line {}] Eval Error: {}", token.line, message)
             }
         }
     }
@@ -49,7 +49,7 @@ impl error::Error for Error {
     fn description(&self) -> &str {
         match self {
             Error::Parse { message, .. } => message,
-            Error::Assignment { message, .. } => message,
+            Error::Report { message, .. } => message,
             Error::Scanner { message, .. } => message,
             Error::Eval { message, .. } => message,
         }

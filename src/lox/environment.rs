@@ -1,13 +1,19 @@
 use super::{error::Error, expr::Literal, token::Token};
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, fmt::Debug, rc::Rc};
 
-#[derive(Clone)]
 struct Env {
     values: HashMap<String, Literal>,
     enclosing: Option<Rc<RefCell<Env>>>,
 }
 
+#[derive(Clone, Debug)]
 pub struct Environment(Rc<RefCell<Env>>);
+
+impl Debug for Env {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "<env>")
+    }
+}
 
 impl Environment {
     pub fn new() -> Environment {
@@ -17,6 +23,17 @@ impl Environment {
         };
 
         Environment(Rc::new(RefCell::new(env)))
+    }
+
+    pub fn get_globals(&self) -> Environment {
+        let content: &Rc<_> = &self.0;
+
+        if let Some(parent) = &content.borrow().enclosing {
+            let parent_ref = Rc::clone(parent);
+            Environment(parent_ref).get_globals()
+        } else {
+            Environment(content.to_owned())
+        }
     }
 
     pub fn new_child(Environment(parent): &Environment) -> Environment {
@@ -30,11 +47,8 @@ impl Environment {
         Environment(Rc::new(RefCell::new(result_env)))
     }
 
-    pub fn define(&mut self, name: &Token, value: &Literal) {
-        (*self.0)
-            .borrow_mut()
-            .values
-            .insert(name.lexeme.clone(), value.clone());
+    pub fn define(&mut self, name: String, value: &Literal) {
+        (*self.0).borrow_mut().values.insert(name, value.clone());
     }
 
     pub fn get(&self, name: &Token) -> Result<Literal, Error> {
@@ -49,6 +63,7 @@ impl Environment {
                 Some(parent) => Environment(parent.to_owned()).get(name).ok(),
             })
             .ok_or(Error::Eval {
+                token: name.clone(),
                 message: format!("Undefined variable '{}'.", name.lexeme),
             })
     }
@@ -66,6 +81,7 @@ impl Environment {
             Environment(parent.to_owned()).assign(name, value)
         } else {
             Err(Error::Eval {
+                token: name.clone(),
                 message: format!("Undefined variable '{}'.", name.lexeme),
             })
         }

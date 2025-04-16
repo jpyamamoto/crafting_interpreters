@@ -68,7 +68,9 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<Stmt>, Error> {
 }
 
 fn declaration(state: &mut ParserState) -> Result<Option<Stmt>, Error> {
-    if match_any_token(state, &[TokenType::Var]) {
+    if match_any_token(state, &[TokenType::Fun]) {
+        function(state, "function").map(Stmt::into)
+    } else if match_any_token(state, &[TokenType::Var]) {
         var_declaration(state).map(Stmt::into)
     } else {
         statement(state).map(Stmt::into)
@@ -80,6 +82,59 @@ fn declaration(state: &mut ParserState) -> Result<Option<Stmt>, Error> {
         }
         _ => Err(err),
     })
+}
+
+fn function(state: &mut ParserState, kind: &str) -> Result<Stmt, Error> {
+    let name = consume(
+        state,
+        &TokenType::Identifier("".to_string()),
+        &format!("Expect {} name.", kind),
+    )?;
+    consume(
+        state,
+        &TokenType::LeftParen,
+        &format!("Expect '(' after {} name.", kind),
+    )?;
+
+    let mut parameters: Vec<Token> = vec![];
+
+    if !state.check(&TokenType::RightParen) {
+        loop {
+            if parameters.len() >= 255 {
+                let err = Error::Report {
+                    token: state.peek().clone(),
+                    message: "Can't have more than 255 parameters.".to_string(),
+                };
+
+                return Err(err);
+            }
+
+            let param = consume(
+                state,
+                &TokenType::Identifier("".to_string()),
+                "Expect parameter name.",
+            )?;
+            parameters.push(param);
+
+            if !match_any_token(state, &[TokenType::Comma]) {
+                break;
+            }
+        }
+    }
+
+    consume(
+        state,
+        &TokenType::RightParen,
+        "Expect ')' after parameters.",
+    )?;
+    consume(
+        state,
+        &TokenType::LeftBrace,
+        &format!("Expect '{{' before {} body.", kind),
+    )?;
+    let body: Vec<Stmt> = block(state)?;
+
+    Ok(Stmt::Function(name, parameters, body))
 }
 
 fn var_declaration(state: &mut ParserState) -> Result<Stmt, Error> {
@@ -112,6 +167,8 @@ fn statement(state: &mut ParserState) -> Result<Stmt, Error> {
         if_statement(state)
     } else if match_any_token(state, &[TokenType::Print]) {
         print_statement(state)
+    } else if match_any_token(state, &[TokenType::Return]) {
+        return_statement(state)
     } else if match_any_token(state, &[TokenType::While]) {
         while_statement(state)
     } else if match_any_token(state, &[TokenType::LeftBrace]) {
@@ -229,6 +286,24 @@ fn print_statement(state: &mut ParserState) -> Result<Stmt, Error> {
     Ok(Stmt::Print(Box::new(value)))
 }
 
+fn return_statement(state: &mut ParserState) -> Result<Stmt, Error> {
+    let keyword = state.previous().to_owned();
+
+    let value = if !state.check(&TokenType::Semicolon) {
+        expression(state)?
+    } else {
+        Expr::Atomic(Literal::Nil)
+    };
+
+    consume(
+        state,
+        &TokenType::Semicolon,
+        "Expect ';' after return value.",
+    )?;
+
+    Ok(Stmt::Return(keyword, Box::new(value)))
+}
+
 fn expression_statement(state: &mut ParserState) -> Result<Stmt, Error> {
     let expr: Expr = expression(state)?;
 
@@ -264,7 +339,7 @@ fn assignment(state: &mut ParserState) -> Result<Expr, Error> {
             return Ok(Expr::Assign(token, Box::new(value)));
         }
 
-        Err(Error::Assignment {
+        Err(Error::Report {
             token: equals,
             message: "Invalid assignment target.".to_string(),
         })
@@ -380,8 +455,48 @@ fn unary(state: &mut ParserState) -> Result<Expr, Error> {
         let right = unary(state)?;
         Ok(Expr::Unary(operator, Box::new(right)))
     } else {
-        primary(state)
+        call(state)
     }
+}
+
+fn call(state: &mut ParserState) -> Result<Expr, Error> {
+    let mut expr = primary(state)?;
+
+    loop {
+        if match_any_token(state, &[TokenType::LeftParen]) {
+            expr = finish_call(state, expr)?;
+        } else {
+            return Ok(expr);
+        }
+    }
+}
+
+fn finish_call(state: &mut ParserState, callee: Expr) -> Result<Expr, Error> {
+    let mut arguments: Vec<Expr> = vec![];
+
+    if !state.check(&TokenType::RightParen) {
+        loop {
+            if arguments.len() >= 255 {
+                let err = Error::Report {
+                    token: state.peek().clone(),
+                    message: "Can't have more than 255 arguments.".to_string(),
+                };
+
+                return Err(err);
+            }
+
+            // The expression is an assignment to avoid arguments being read as a comma expr.
+            let expr_arg = assignment(state)?;
+            arguments.push(expr_arg);
+
+            if !match_any_token(state, &[TokenType::Comma]) {
+                break;
+            }
+        }
+    };
+
+    let paren = consume(state, &TokenType::RightParen, "Expect ')' after arguments.")?;
+    Ok(Expr::Call(Box::new(callee), arguments, paren))
 }
 
 fn primary(state: &mut ParserState) -> Result<Expr, Error> {
