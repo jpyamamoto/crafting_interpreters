@@ -87,7 +87,7 @@ fn declaration(state: &mut ParserState) -> Result<Option<Stmt>, Error> {
 fn function(state: &mut ParserState, kind: &str) -> Result<Stmt, Error> {
     let name = consume(
         state,
-        &TokenType::Identifier("".to_string()),
+        &TokenType::Identifier,
         &format!("Expect {} name.", kind),
     )?;
     consume(
@@ -109,11 +109,7 @@ fn function(state: &mut ParserState, kind: &str) -> Result<Stmt, Error> {
                 return Err(err);
             }
 
-            let param = consume(
-                state,
-                &TokenType::Identifier("".to_string()),
-                "Expect parameter name.",
-            )?;
+            let param = consume(state, &TokenType::Identifier, "Expect parameter name.")?;
             parameters.push(param);
 
             if !match_any_token(state, &[TokenType::Comma]) {
@@ -138,11 +134,7 @@ fn function(state: &mut ParserState, kind: &str) -> Result<Stmt, Error> {
 }
 
 fn var_declaration(state: &mut ParserState) -> Result<Stmt, Error> {
-    let name: Token = consume(
-        state,
-        &TokenType::Identifier("".to_string()),
-        "Expect variable name.",
-    )?;
+    let name: Token = consume(state, &TokenType::Identifier, "Expect variable name.")?;
 
     let initializer = if match_any_token(state, &[TokenType::Equal]) {
         let expr = expression(state)?;
@@ -506,14 +498,14 @@ fn primary(state: &mut ParserState) -> Result<Expr, Error> {
             TokenType::False,
             TokenType::True,
             TokenType::Nil,
-            TokenType::Number(0.0),
-            TokenType::String(String::new()),
+            TokenType::Number,
+            TokenType::String,
         ],
     ) {
         return Ok(Expr::Atomic(state.previous().try_into()?));
     }
 
-    if match_any_token(state, &[TokenType::Identifier("".to_string())]) {
+    if match_any_token(state, &[TokenType::Identifier]) {
         let name = state.previous().to_owned();
         return Ok(Expr::Variable(name));
     }

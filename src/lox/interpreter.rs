@@ -1,15 +1,23 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use ordered_float::OrderedFloat;
+
 use super::environment::Environment;
 use super::error::Error;
 use super::expr::{BinaryOp, Expr, Function, Literal, LogicalOp, NativeFunction, UnaryOp};
+use super::resolver::Locals;
 use super::stmt::Stmt;
 use super::token::Token;
 
 type ExecResult = Result<Option<Literal>, Error>;
 type EvalResult = Result<Literal, Error>;
 
-pub fn interpret(statements: Vec<Stmt>) -> ExecResult {
+struct State {
+    env: Environment,
+    locals: Locals,
+}
+
+pub fn interpret(statements: Vec<Stmt>, locals: Locals) -> ExecResult {
     let mut env = Environment::new();
 
     env.define(
@@ -23,61 +31,66 @@ pub fn interpret(statements: Vec<Stmt>) -> ExecResult {
                     .duration_since(UNIX_EPOCH)
                     .map(|t| t.as_secs_f64())
                     .unwrap_or_else(|t| -t.duration().as_secs_f64());
-                Ok(Literal::Number(seconds))
+                Ok(Literal::Number(seconds.into()))
             },
         }),
     );
 
+    let mut state = State { env, locals };
+
     for statement in statements {
-        execute(&statement, &mut env)?;
+        execute(&statement, &mut state)?;
     }
 
     Ok(None)
 }
 
-fn execute(statement: &Stmt, env: &mut Environment) -> ExecResult {
+fn execute(statement: &Stmt, state: &mut State) -> ExecResult {
     match statement {
         Stmt::Expr(expr) => {
-            evaluate(expr, env)?;
+            evaluate(expr, state)?;
             Ok(None)
         }
         Stmt::Print(expr) => {
-            let value = evaluate(expr, env)?;
+            let value = evaluate(expr, state)?;
             println!("{}", value);
             Ok(None)
         }
         Stmt::Var(token, None) => {
-            env.define(token.lexeme.clone(), &Literal::Nil);
+            state.env.define(token.lexeme.clone(), &Literal::Nil);
             Ok(None)
         }
         Stmt::Var(token, Some(expr)) => {
-            let value = evaluate(expr, env)?;
-            env.define(token.lexeme.clone(), &value);
+            let value = evaluate(expr, state)?;
+            state.env.define(token.lexeme.clone(), &value);
             Ok(None)
         }
-        Stmt::Block(statements) => Ok(execute_block(statements, env)?),
+        Stmt::Block(statements) => Ok(execute_block(statements, state)?),
         Stmt::If(condition, then_branch, else_branch) => {
-            Ok(execute_if(condition, then_branch, else_branch, env)?)
+            Ok(execute_if(condition, then_branch, else_branch, state)?)
         }
-        Stmt::While(condition, body) => Ok(execute_while(condition, body, env)?),
-        Stmt::Function(name, params, body) => {
-            Ok(execute_func(name, params.to_owned(), body.to_owned(), env)?)
-        }
-        Stmt::Return(_, expr) => execute_return(expr, env).map(Option::from),
+        Stmt::While(condition, body) => Ok(execute_while(condition, body, state)?),
+        Stmt::Function(name, params, body) => Ok(execute_func(
+            name,
+            params.to_owned(),
+            body.to_owned(),
+            state,
+        )?),
+        Stmt::Return(_, expr) => execute_return(expr, state).map(Option::from),
     }
 }
 
-fn evaluate(expr: &Expr, env: &mut Environment) -> EvalResult {
+fn evaluate(expr: &Expr, state: &mut State) -> EvalResult {
     match expr {
         Expr::Atomic(literal) => evaluate_literal(literal),
-        Expr::Unary(op, expr) => evaluate_unary(op, expr, env),
-        Expr::Binary(expr1, op, expr2) => evaluate_binary(op, expr1, expr2, env),
-        Expr::Ternary(expr1, expr2, expr3) => evaluate_ternary(expr1, expr2, expr3, env),
-        Expr::Grouping(expr) => evaluate(expr, env),
-        Expr::Variable(token) => env.get(token),
-        Expr::Assign(token, expr) => evaluate_assign(token, expr, env),
-        Expr::Logical(expr1, op, expr2) => evaluate_logical(op, expr1, expr2, env),
-        Expr::Call(callee, arguments, paren) => evaluate_call(callee, arguments, paren, env),
+        Expr::Unary(op, expr) => evaluate_unary(op, expr, state),
+        Expr::Binary(expr1, op, expr2) => evaluate_binary(op, expr1, expr2, state),
+        Expr::Ternary(expr1, expr2, expr3) => evaluate_ternary(expr1, expr2, expr3, state),
+        Expr::Grouping(expr) => evaluate(expr, state),
+        Expr::Variable(token) => lookup_variable(token, state),
+        Expr::Assign(token, expr) => evaluate_assign(token, expr, state),
+        Expr::Logical(expr1, op, expr2) => evaluate_logical(op, expr1, expr2, state),
+        Expr::Call(callee, arguments, paren) => evaluate_call(callee, arguments, paren, state),
     }
 }
 
@@ -85,8 +98,8 @@ fn evaluate_literal(literal: &Literal) -> EvalResult {
     Ok(literal.to_owned())
 }
 
-fn evaluate_unary(op: &UnaryOp, expr: &Expr, env: &mut Environment) -> EvalResult {
-    let right: Literal = evaluate(expr, env)?;
+fn evaluate_unary(op: &UnaryOp, expr: &Expr, state: &mut State) -> EvalResult {
+    let right: Literal = evaluate(expr, state)?;
 
     match op {
         UnaryOp::Bang => {
@@ -109,9 +122,9 @@ fn evaluate_unary(op: &UnaryOp, expr: &Expr, env: &mut Environment) -> EvalResul
     }
 }
 
-fn evaluate_binary(op: &BinaryOp, expr1: &Expr, expr2: &Expr, env: &mut Environment) -> EvalResult {
-    let left: Literal = evaluate(expr1, env)?;
-    let right: Literal = evaluate(expr2, env)?;
+fn evaluate_binary(op: &BinaryOp, expr1: &Expr, expr2: &Expr, state: &mut State) -> EvalResult {
+    let left: Literal = evaluate(expr1, state)?;
+    let right: Literal = evaluate(expr2, state)?;
 
     match op {
         BinaryOp::Minus(token) => {
@@ -233,43 +246,44 @@ fn evaluate_binary(op: &BinaryOp, expr1: &Expr, expr2: &Expr, env: &mut Environm
     }
 }
 
-fn evaluate_ternary(expr1: &Expr, expr2: &Expr, expr3: &Expr, env: &mut Environment) -> EvalResult {
-    let guard: Literal = evaluate(expr1, env)?;
+fn evaluate_ternary(expr1: &Expr, expr2: &Expr, expr3: &Expr, state: &mut State) -> EvalResult {
+    let guard: Literal = evaluate(expr1, state)?;
 
     if is_truthy(&guard) {
-        evaluate(expr2, env)
+        evaluate(expr2, state)
     } else {
-        evaluate(expr3, env)
+        evaluate(expr3, state)
     }
 }
 
-fn evaluate_assign(token: &Token, expr: &Expr, env: &mut Environment) -> EvalResult {
-    let value = evaluate(expr, env)?;
-    env.assign(token, &value)?;
+fn evaluate_assign(token: &Token, expr: &Expr, state: &mut State) -> EvalResult {
+    let value = evaluate(expr, state)?;
+
+    if let Some(distance) = state.locals.get(token) {
+        state.env.assign_at(*distance, token, &value)?;
+    } else {
+        state.env.get_globals().assign(token, &value)?;
+    }
+
     Ok(value)
 }
 
-fn evaluate_logical(
-    op: &LogicalOp,
-    expr1: &Expr,
-    expr2: &Expr,
-    env: &mut Environment,
-) -> EvalResult {
-    let left = evaluate(expr1, env)?;
+fn evaluate_logical(op: &LogicalOp, expr1: &Expr, expr2: &Expr, state: &mut State) -> EvalResult {
+    let left = evaluate(expr1, state)?;
 
     match op {
         LogicalOp::Or => {
             if is_truthy(&left) {
                 Ok(left)
             } else {
-                evaluate(expr2, env)
+                evaluate(expr2, state)
             }
         }
         LogicalOp::And => {
             if !is_truthy(&left) {
                 Ok(left)
             } else {
-                evaluate(expr2, env)
+                evaluate(expr2, state)
             }
         }
     }
@@ -279,14 +293,14 @@ fn evaluate_call(
     callee_expr: &Expr,
     arguments_expr: &Vec<Expr>,
     end_token: &Token,
-    env: &mut Environment,
+    state: &mut State,
 ) -> EvalResult {
-    let callee = evaluate(callee_expr, env)?;
+    let callee = evaluate(callee_expr, state)?;
 
     let mut arguments: Vec<Literal> = vec![];
 
     for arg_expr in arguments_expr {
-        let arg = evaluate(arg_expr, env)?;
+        let arg = evaluate(arg_expr, state)?;
         arguments.push(arg);
     }
 
@@ -302,7 +316,7 @@ fn evaluate_call(
                     ),
                 })
             } else {
-                (callable.call)(env, arguments)
+                (callable.call)(&mut state.env, arguments)
             }
         }
         Literal::Function(callable) => {
@@ -317,7 +331,6 @@ fn evaluate_call(
                 });
             }
 
-            // let globals = env.get_globals();
             let parent = callable.closure;
             let mut env = Environment::new_child(&parent);
 
@@ -325,7 +338,12 @@ fn evaluate_call(
                 env.define(param.lexeme.clone(), &arg);
             }
 
-            let result = execute_block(&callable.body, &mut env)?;
+            let mut new_state = State {
+                env,
+                locals: state.locals.clone(),
+            };
+
+            let result = execute_block(&callable.body, &mut new_state)?;
 
             Ok(result.unwrap_or(Literal::Nil))
         }
@@ -340,25 +358,29 @@ fn execute_if(
     condition: &Expr,
     then_branch: &Stmt,
     else_branch: &Option<Box<Stmt>>,
-    env: &mut Environment,
+    state: &mut State,
 ) -> ExecResult {
-    let guard = evaluate(condition, env)?;
+    let guard = evaluate(condition, state)?;
 
     if is_truthy(&guard) {
-        execute(then_branch, env)
+        execute(then_branch, state)
     } else {
         match else_branch {
-            Some(else_stmt) => execute(else_stmt, env),
+            Some(else_stmt) => execute(else_stmt, state),
             None => Ok(None),
         }
     }
 }
 
-fn execute_block(statements: &Vec<Stmt>, env: &mut Environment) -> ExecResult {
-    let mut block_env = Environment::new_child(env);
+fn execute_block(statements: &Vec<Stmt>, state: &mut State) -> ExecResult {
+    let block_env = Environment::new_child(&state.env);
+    let mut block_state = State {
+        env: block_env,
+        locals: state.locals.clone(),
+    };
 
     for stmt in statements {
-        let result = execute(stmt, &mut block_env)?;
+        let result = execute(stmt, &mut block_state)?;
 
         if let Some(return_lit) = result {
             return Ok(Some(return_lit));
@@ -368,9 +390,9 @@ fn execute_block(statements: &Vec<Stmt>, env: &mut Environment) -> ExecResult {
     Ok(None)
 }
 
-fn execute_while(condition: &Expr, body: &Stmt, env: &mut Environment) -> ExecResult {
-    while is_truthy(&evaluate(condition, env)?) {
-        let result = execute(body, env)?;
+fn execute_while(condition: &Expr, body: &Stmt, state: &mut State) -> ExecResult {
+    while is_truthy(&evaluate(condition, state)?) {
+        let result = execute(body, state)?;
 
         if let Some(return_lit) = result {
             return Ok(Some(return_lit));
@@ -384,28 +406,39 @@ fn execute_func(
     name: &Token,
     params: Vec<Token>,
     body: Vec<Stmt>,
-    env: &mut Environment,
+    state: &mut State,
 ) -> ExecResult {
     let func = Function {
         params,
         name: name.to_owned(),
         body,
-        closure: env.to_owned(),
+        closure: state.env.to_owned(),
     };
 
-    env.define(name.lexeme.clone(), &Literal::Function(func));
+    state
+        .env
+        .define(name.lexeme.clone(), &Literal::Function(func));
     Ok(None)
 }
 
-fn execute_return(expr: &Expr, env: &mut Environment) -> ExecResult {
-    evaluate(expr, env).map(Option::from)
+fn execute_return(expr: &Expr, state: &mut State) -> ExecResult {
+    evaluate(expr, state).map(Option::from)
+}
+
+fn lookup_variable(name: &Token, state: &mut State) -> EvalResult {
+    let distance = state.locals.get(name);
+
+    match distance {
+        Some(d) => state.env.get_at(*d, name),
+        None => state.env.get_globals().get(name),
+    }
 }
 
 fn is_truthy(expr: &Literal) -> bool {
     !matches!(expr, Literal::Nil | Literal::False)
 }
 
-fn retrieve_nums(expr1: Literal, expr2: Literal) -> Option<(f64, f64)> {
+fn retrieve_nums(expr1: Literal, expr2: Literal) -> Option<(OrderedFloat<f64>, OrderedFloat<f64>)> {
     if let (Literal::Number(expr1_num), Literal::Number(expr2_num)) = (expr1, expr2) {
         Some((expr1_num, expr2_num))
     } else {

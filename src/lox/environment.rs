@@ -68,6 +68,47 @@ impl Environment {
             })
     }
 
+    pub fn get_at(&self, distance: usize, name: &Token) -> Result<Literal, Error> {
+        self.ancestor(distance)
+            .borrow()
+            .values
+            .get(&name.lexeme)
+            .map(|l| l.to_owned())
+            .ok_or(Error::Eval {
+                token: name.clone(),
+                message: format!("Undefined variable '{}'.", name.lexeme),
+            })
+    }
+
+    fn ancestor(&self, distance: usize) -> Rc<RefCell<Env>> {
+        let mut current = self.0.clone();
+
+        for _ in 0..distance {
+            let maybe_enclosing = current.borrow().enclosing.as_ref().map(Rc::clone);
+
+            if let Some(env) = maybe_enclosing {
+                current = env;
+            } else {
+                break;
+            }
+        }
+
+        current.clone()
+    }
+
+    pub fn assign_at(
+        &mut self,
+        distance: usize,
+        name: &Token,
+        value: &Literal,
+    ) -> Result<(), Error> {
+        self.ancestor(distance)
+            .borrow_mut()
+            .values
+            .insert(name.lexeme.clone(), value.clone());
+        Ok(())
+    }
+
     pub fn assign(&mut self, name: &Token, value: &Literal) -> Result<(), Error> {
         if self.0.borrow().values.contains_key(&name.lexeme) {
             (*self.0)

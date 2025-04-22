@@ -7,7 +7,7 @@ use clap::Parser;
 use lox::error::Error;
 use lox::stmt::Stmt;
 use lox::token::Token;
-use lox::{interpreter, parser, scanner};
+use lox::{interpreter, parser, resolver, scanner};
 use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::Path;
@@ -73,7 +73,9 @@ fn run_or_err(source: String) -> Result<bool, Error> {
     let tokens: Vec<Token> = scanner::scan_tokens(source)?;
     let statements: Vec<Stmt> = parser::parse(tokens)?;
 
-    interpreter::interpret(statements)?;
+    let locals = resolver::resolve(&statements)?;
+
+    interpreter::interpret(statements, locals)?;
 
     Ok(true)
 }

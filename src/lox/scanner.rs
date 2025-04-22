@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 
+use ordered_float::OrderedFloat;
+
 use super::error::{Error, Error::Scanner};
-use super::token::{Token, TokenType};
+use super::token::{InternalValue, Token, TokenType};
 
 struct ScannerState {
     source: String,
@@ -84,6 +86,7 @@ pub fn scan_tokens(source: String) -> Result<Vec<Token>, Error> {
         type_token: TokenType::Eof,
         lexeme: "".to_string(),
         line: state.line,
+        value: None,
     });
 
     Ok(state.tokens)
@@ -94,51 +97,51 @@ fn scan_token(state: &mut ScannerState) -> Result<(), Error> {
 
     match c {
         '(' => {
-            add_token(state, TokenType::LeftParen);
+            add_token(state, TokenType::LeftParen, None);
             Ok(())
         }
         ')' => {
-            add_token(state, TokenType::RightParen);
+            add_token(state, TokenType::RightParen, None);
             Ok(())
         }
         '{' => {
-            add_token(state, TokenType::LeftBrace);
+            add_token(state, TokenType::LeftBrace, None);
             Ok(())
         }
         '}' => {
-            add_token(state, TokenType::RightBrace);
+            add_token(state, TokenType::RightBrace, None);
             Ok(())
         }
         ',' => {
-            add_token(state, TokenType::Comma);
+            add_token(state, TokenType::Comma, None);
             Ok(())
         }
         '.' => {
-            add_token(state, TokenType::Dot);
+            add_token(state, TokenType::Dot, None);
             Ok(())
         }
         '-' => {
-            add_token(state, TokenType::Minus);
+            add_token(state, TokenType::Minus, None);
             Ok(())
         }
         '+' => {
-            add_token(state, TokenType::Plus);
+            add_token(state, TokenType::Plus, None);
             Ok(())
         }
         ';' => {
-            add_token(state, TokenType::Semicolon);
+            add_token(state, TokenType::Semicolon, None);
             Ok(())
         }
         '*' => {
-            add_token(state, TokenType::Star);
+            add_token(state, TokenType::Star, None);
             Ok(())
         }
         '?' => {
-            add_token(state, TokenType::Mark);
+            add_token(state, TokenType::Mark, None);
             Ok(())
         }
         ':' => {
-            add_token(state, TokenType::Colon);
+            add_token(state, TokenType::Colon, None);
             Ok(())
         }
         '!' => {
@@ -150,6 +153,7 @@ fn scan_token(state: &mut ScannerState) -> Result<(), Error> {
                 } else {
                     TokenType::Bang
                 },
+                None,
             );
             Ok(())
         }
@@ -162,6 +166,7 @@ fn scan_token(state: &mut ScannerState) -> Result<(), Error> {
                 } else {
                     TokenType::Equal
                 },
+                None,
             );
             Ok(())
         }
@@ -174,6 +179,7 @@ fn scan_token(state: &mut ScannerState) -> Result<(), Error> {
                 } else {
                     TokenType::Less
                 },
+                None,
             );
             Ok(())
         }
@@ -186,6 +192,7 @@ fn scan_token(state: &mut ScannerState) -> Result<(), Error> {
                 } else {
                     TokenType::Greater
                 },
+                None,
             );
             Ok(())
         }
@@ -197,7 +204,7 @@ fn scan_token(state: &mut ScannerState) -> Result<(), Error> {
             } else if matches_multiline {
                 let _ = multiline_comment(state);
             } else {
-                add_token(state, TokenType::Slash)
+                add_token(state, TokenType::Slash, None)
             };
 
             Ok(())
@@ -238,13 +245,14 @@ fn match_char(state: &mut ScannerState, expected: char) -> bool {
     true
 }
 
-fn add_token(state: &mut ScannerState, token: TokenType) {
+fn add_token(state: &mut ScannerState, token: TokenType, value: Option<InternalValue>) {
     let text: String = substring(&state.source, state.start, state.current);
 
     let token = Token {
         type_token: token,
         lexeme: text,
         line: state.line,
+        value,
     };
 
     state.tokens.push(token);
@@ -297,7 +305,7 @@ fn string(state: &mut ScannerState) -> Result<(), Error> {
     state.advance();
 
     let value: String = substring(&state.source, state.start + 1, state.current - 1);
-    add_token(state, TokenType::String(value));
+    add_token(state, TokenType::String, Some(InternalValue::Text(value)));
 
     Ok(())
 }
@@ -316,7 +324,11 @@ fn number(state: &mut ScannerState) {
 
     let lexeme = substring(&state.source, state.start, state.current);
     let value: f64 = lexeme.parse().unwrap();
-    add_token(state, TokenType::Number(value));
+    add_token(
+        state,
+        TokenType::Number,
+        Some(InternalValue::Number(OrderedFloat(value))),
+    );
 }
 
 fn identifier(state: &mut ScannerState) {
@@ -327,9 +339,9 @@ fn identifier(state: &mut ScannerState) {
     let text: String = substring(&state.source, state.start, state.current);
     let token_type: TokenType = KEYWORDS
         .get(&text as &str)
-        .unwrap_or(&TokenType::Identifier(text))
+        .unwrap_or(&TokenType::Identifier)
         .clone();
-    add_token(state, token_type);
+    add_token(state, token_type, Some(InternalValue::Text(text)));
 }
 
 fn substring(s: &str, begin: usize, end: usize) -> String {

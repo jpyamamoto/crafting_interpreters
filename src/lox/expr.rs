@@ -1,12 +1,14 @@
 use std::convert::TryFrom;
 use std::fmt::Display;
 
+use ordered_float::OrderedFloat;
+
 use super::environment::Environment;
 use super::error::Error;
 use super::stmt::Stmt;
-use super::token::{Token, TokenType};
+use super::token::{InternalValue, Token, TokenType};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Expr {
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
     Call(Box<Expr>, Vec<Expr>, Token),
@@ -23,7 +25,7 @@ pub enum Expr {
     Assign(Token, Box<Expr>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq)]
 pub enum BinaryOp {
     Comma,
     BangEqual,
@@ -38,7 +40,7 @@ pub enum BinaryOp {
     Star(Token),
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogicalOp {
     Or,
     And,
@@ -69,7 +71,7 @@ pub struct Function {
 pub enum Literal {
     Identifier(String),
     String(String),
-    Number(f64),
+    Number(OrderedFloat<f64>),
     True,
     False,
     Nil,
@@ -107,6 +109,33 @@ impl Display for Expr {
     }
 }
 
+impl PartialEq for Expr {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Atomic(literal1), Self::Atomic(literal2)) => literal1 == literal2,
+            (Self::Unary(op1, expr1), Self::Unary(op2, expr2)) => op1 == op2 && expr1 == expr2,
+            (Self::Binary(left1, op1, right1), Self::Binary(left2, op2, right2)) => {
+                op1 == op2 && left1 == left2 && right1 == right2
+            }
+            (Self::Grouping(expr1), Self::Grouping(expr2)) => expr1 == expr2,
+            (Self::Ternary(cond1, then1, else1), Self::Ternary(cond2, then2, else2)) => {
+                cond1 == cond2 && then1 == then2 && else1 == else2
+            }
+            (Self::Logical(left1, op1, right1), Self::Logical(left2, op2, right2)) => {
+                left1 == left2 && op1 == op2 && right1 == right2
+            }
+            (Self::Call(callee1, params1, _), Self::Call(callee2, params2, _)) => {
+                callee1 == callee2 && params1 == params2
+            }
+            (Self::Assign(name1, expr1), Self::Assign(name2, expr2)) => {
+                name1 == name2 && expr1 == expr2
+            }
+            (Self::Variable(var1), Self::Variable(var2)) => var1 == var2,
+            _ => false,
+        }
+    }
+}
+
 impl Display for BinaryOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -125,12 +154,24 @@ impl Display for BinaryOp {
     }
 }
 
+impl PartialEq for BinaryOp {
+    fn eq(&self, other: &Self) -> bool {
+        core::mem::discriminant(self) == core::mem::discriminant(other)
+    }
+}
+
 impl Display for UnaryOp {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             UnaryOp::Bang => write!(f, "!"),
             UnaryOp::Minus(_) => write!(f, "-"),
         }
+    }
+}
+
+impl PartialEq for UnaryOp {
+    fn eq(&self, other: &Self) -> bool {
+        core::mem::discriminant(self) == core::mem::discriminant(other)
     }
 }
 
@@ -178,9 +219,36 @@ impl TryFrom<&Token> for Literal {
 
     fn try_from(token: &Token) -> Result<Self, Self::Error> {
         match &token.type_token {
-            TokenType::Identifier(v) => Ok(Literal::Identifier(v.clone())),
-            TokenType::String(v) => Ok(Literal::String(v.clone())),
-            TokenType::Number(v) => Ok(Literal::Number(*v)),
+            TokenType::Identifier => {
+                if let Some(InternalValue::Text(value)) = &token.value {
+                    Ok(Literal::Identifier(value.clone()))
+                } else {
+                    Err(Error::Parse {
+                        token: token.clone(),
+                        message: "Can't retrieve variable name".to_string(),
+                    })
+                }
+            }
+            TokenType::String => {
+                if let Some(InternalValue::Text(value)) = &token.value {
+                    Ok(Literal::String(value.clone()))
+                } else {
+                    Err(Error::Parse {
+                        token: token.clone(),
+                        message: "Can't retrieve string content".to_string(),
+                    })
+                }
+            }
+            TokenType::Number => {
+                if let Some(InternalValue::Number(value)) = token.value {
+                    Ok(Literal::Number(value))
+                } else {
+                    Err(Error::Parse {
+                        token: token.clone(),
+                        message: "Can't retrieve number value".to_string(),
+                    })
+                }
+            }
             TokenType::False => Ok(Literal::False),
             TokenType::True => Ok(Literal::True),
             TokenType::Nil => Ok(Literal::Nil),
@@ -248,6 +316,8 @@ impl TryFrom<&Token> for LogicalOp {
 
 #[cfg(test)]
 mod tests {
+    use ordered_float::OrderedFloat;
+
     use crate::lox::{
         expr::{BinaryOp, Expr, Literal, UnaryOp},
         token::{Token, TokenType},
@@ -261,16 +331,18 @@ mod tests {
                     type_token: TokenType::Minus,
                     lexeme: "-".to_string(),
                     line: 1,
+                    value: None,
                 }),
-                Box::new(Expr::Atomic(Literal::Number(123.0))),
+                Box::new(Expr::Atomic(Literal::Number(OrderedFloat(123.0)))),
             )),
             BinaryOp::Star(Token {
                 type_token: TokenType::Star,
                 lexeme: "*".to_string(),
                 line: 1,
+                value: None,
             }),
             Box::new(Expr::Grouping(Box::new(Expr::Atomic(Literal::Number(
-                45.67,
+                OrderedFloat(45.67),
             ))))),
         );
 

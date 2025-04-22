@@ -26,11 +26,11 @@ impl fmt::Display for Error {
             }
             Error::Report { token, message } => {
                 if token.type_token == TokenType::Eof {
-                    write!(f, "[line {}] Parsing Error at end: {}", token.line, message)
+                    write!(f, "[line {}] Error at end: {}", token.line, message)
                 } else {
                     write!(
                         f,
-                        "[line {}] Parsing Error at '{}': {}",
+                        "[line {}] Error at '{}': {}",
                         token.line, token.lexeme, message
                     )
                 }
