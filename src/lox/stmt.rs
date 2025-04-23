@@ -2,6 +2,13 @@ use super::{expr::Expr, token::Token};
 use std::fmt::{Debug, Display};
 
 #[derive(Clone)]
+pub struct FuncContainer {
+    pub name: Token,
+    pub params: Vec<Token>,
+    pub body: Vec<Stmt>,
+}
+
+#[derive(Clone)]
 pub enum Stmt {
     Expr(Box<Expr>),
     Print(Box<Expr>),
@@ -10,7 +17,8 @@ pub enum Stmt {
     Block(Vec<Stmt>),
     If(Box<Expr>, Box<Stmt>, Option<Box<Stmt>>),
     While(Box<Expr>, Box<Stmt>),
-    Function(Token, Vec<Token>, Vec<Stmt>),
+    Function(FuncContainer),
+    Class(Token, Vec<FuncContainer>),
 }
 
 impl Display for Stmt {
@@ -39,7 +47,7 @@ impl Display for Stmt {
                 write!(f, "if ({}) {}", condition, then_branch)
             }
             Stmt::While(condition, body) => write!(f, "while ({}) {}", condition, body),
-            Stmt::Function(name, params, body) => {
+            Stmt::Function(FuncContainer { name, params, body }) => {
                 let mut params_str: String = String::new();
 
                 for param in params {
@@ -61,6 +69,9 @@ impl Display for Stmt {
 
                 block_str.push('}');
                 write!(f, "{}({}){}", name.lexeme, params_str, block_str)
+            }
+            Stmt::Class(name, _) => {
+                write!(f, "class {} {{}}", name.lexeme)
             }
         }
     }

@@ -1,6 +1,11 @@
 use std::{borrow::BorrowMut, collections::HashMap};
 
-use super::{error::Error, expr::Expr, stmt::Stmt, token::Token};
+use super::{
+    error::Error,
+    expr::Expr,
+    stmt::{FuncContainer, Stmt},
+    token::Token,
+};
 
 type Scope = HashMap<String, bool>;
 pub type Locals = HashMap<Token, usize>;
@@ -9,6 +14,7 @@ pub type Locals = HashMap<Token, usize>;
 enum FunctionType {
     None,
     Function,
+    Method,
 }
 
 struct State {
@@ -69,7 +75,7 @@ fn resolve_stmt(statement: &Stmt, state: &mut State) -> Result<(), Error> {
             resolve_expr(condition, state)?;
             resolve_stmt(body, state)
         }
-        Stmt::Function(name, params, body) => {
+        Stmt::Function(FuncContainer { name, params, body }) => {
             declare(name, state)?;
             define(name, state);
 
@@ -85,6 +91,24 @@ fn resolve_stmt(statement: &Stmt, state: &mut State) -> Result<(), Error> {
             };
 
             resolve_expr(expr, state)
+        }
+        Stmt::Class(name, methods) => {
+            declare(name, state)?;
+            define(name, state);
+
+            begin_scope(state);
+
+            if let Some(scope) = state.scopes.last_mut() {
+                scope.insert("this".to_string(), true);
+            }
+
+            for method in methods {
+                resolve_function(&method.params, &method.body, state, FunctionType::Method)?;
+            }
+
+            end_scope(state);
+
+            Ok(())
         }
     }
 }
@@ -103,6 +127,12 @@ fn resolve_expr(expr: &Expr, state: &mut State) -> Result<(), Error> {
             resolve_expr(expr3, state)
         }
         Expr::Grouping(expr) => resolve_expr(expr, state),
+        Expr::Get(expr, _) => resolve_expr(expr, state),
+        Expr::Set(object, _, value) => {
+            resolve_expr(value, state)?;
+            resolve_expr(object, state)?;
+            Ok(())
+        }
         Expr::Variable(token) => {
             if let Some(scope) = state.scopes.last() {
                 if let Some(false) = scope.get(&token.lexeme) {
@@ -136,6 +166,7 @@ fn resolve_expr(expr: &Expr, state: &mut State) -> Result<(), Error> {
 
             Ok(())
         }
+        Expr::This(token) => resolve_local(token, state),
     }
 }
 
@@ -171,7 +202,7 @@ fn define(name: &Token, state: &mut State) {
 fn resolve_local(name: &Token, state: &mut State) -> Result<(), Error> {
     let scopes_size = state.scopes.len();
 
-    for i in (0..=(scopes_size - 1)).rev() {
+    for i in (0..scopes_size).rev() {
         if state.scopes[i].contains_key(&name.lexeme) {
             state
                 .locals

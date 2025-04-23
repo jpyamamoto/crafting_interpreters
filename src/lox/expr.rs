@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::Display;
+use std::rc::Rc;
 
 use ordered_float::OrderedFloat;
 
@@ -12,6 +14,8 @@ use super::token::{InternalValue, Token, TokenType};
 pub enum Expr {
     Binary(Box<Expr>, BinaryOp, Box<Expr>),
     Call(Box<Expr>, Vec<Expr>, Token),
+    Get(Box<Expr>, Token),
+    Set(Box<Expr>, Token, Box<Expr>),
     Grouping(Box<Expr>),
 
     // Analog to Literal, since we're not using a separate type to represent the
@@ -23,6 +27,7 @@ pub enum Expr {
 
     Variable(Token),
     Assign(Token, Box<Expr>),
+    This(Token),
 }
 
 #[derive(Debug, Clone, Eq)]
@@ -67,6 +72,73 @@ pub struct Function {
     pub closure: Environment,
 }
 
+impl Function {
+    pub fn bind(self, instance: Instance) -> Function {
+        let mut environment = Environment::new_child(&self.closure);
+        environment.define("this".to_string(), &Literal::Instance(instance));
+
+        Function {
+            params: self.params,
+            name: self.name,
+            body: self.body,
+            closure: environment,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Class {
+    pub name: String,
+    pub methods: HashMap<String, Function>,
+}
+
+impl Class {
+    pub fn find_method(&self, name: String) -> Option<Function> {
+        self.methods.get(&name).map(Function::to_owned)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Instance {
+    pub class: Rc<Class>,
+    pub fields: HashMap<String, Literal>,
+}
+
+impl Instance {
+    pub fn new(class: Class) -> Instance {
+        Instance {
+            class: Rc::new(class),
+            fields: HashMap::new(),
+        }
+    }
+
+    pub fn get(self, name: &Token) -> Result<Literal, Error> {
+        if name.lexeme == "flavor" {
+            println!("Get: {:?}", self);
+        }
+
+        if let Some(field) = self.fields.get(&name.lexeme) {
+            return Ok(field.clone());
+        }
+
+        let method = self.class.find_method(name.lexeme.clone());
+
+        if let Some(method) = method {
+            let func = method.bind(self);
+            Ok(Literal::Function(func))
+        } else {
+            Err(Error::Eval {
+                token: name.clone(),
+                message: format!("Undefined property '{}'.", name.lexeme),
+            })
+        }
+    }
+
+    pub fn set(&mut self, name: &Token, value: Literal) {
+        self.fields.insert(name.lexeme.clone(), value);
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Literal {
     Identifier(String),
@@ -77,6 +149,8 @@ pub enum Literal {
     Nil,
     NativeFunction(NativeFunction),
     Function(Function),
+    Class(Class),
+    Instance(Instance),
 }
 
 impl Display for Expr {
@@ -84,6 +158,8 @@ impl Display for Expr {
         match self {
             Expr::Binary(left, op, right) => write!(f, "({} {} {})", op, left, right),
             Expr::Grouping(expr) => write!(f, "(group {})", expr),
+            Expr::Get(expr, name) => write!(f, "{}.{}", expr, name.lexeme),
+            Expr::Set(object, name, value) => write!(f, "{} {} {}", object, name.lexeme, value),
             Expr::Atomic(literal) => write!(f, "{}", literal),
             Expr::Unary(op, expr) => write!(f, "({} {})", op, expr),
             Expr::Ternary(guard, t, e) => write!(f, "({} ? {} : {})", guard, t, e),
@@ -105,6 +181,7 @@ impl Display for Expr {
 
                 write!(f, "{}({})", callee, args_str)
             }
+            Expr::This(_keyword) => write!(f, "this"),
         }
     }
 }
@@ -195,6 +272,8 @@ impl Display for Literal {
             Literal::Nil => write!(f, "nil"),
             Literal::NativeFunction(native_func) => write!(f, "{}", native_func.name),
             Literal::Function(func) => write!(f, "<fn {}>", func.name.lexeme),
+            Literal::Class(class) => write!(f, "<class {}>", class.name),
+            Literal::Instance(instance) => write!(f, "<instance {}>", instance.class.name),
         }
     }
 }

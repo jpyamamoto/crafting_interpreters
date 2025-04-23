@@ -11,7 +11,8 @@ pub struct Environment(Rc<RefCell<Env>>);
 
 impl Debug for Env {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "<env>")
+        let values = &self.values;
+        write!(f, "<env : {:?}>", values.keys())
     }
 }
 
@@ -59,7 +60,6 @@ impl Environment {
             .map(|v| v.to_owned())
             .or_else(|| match &self.0.borrow().enclosing {
                 None => None,
-                // Some(parent) => parent.borrow().get(name).ok(),
                 Some(parent) => Environment(parent.to_owned()).get(name).ok(),
             })
             .ok_or(Error::Eval {

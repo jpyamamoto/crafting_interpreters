@@ -1,6 +1,6 @@
 use super::error::Error;
 use super::expr::{BinaryOp, Expr, Literal, UnaryOp};
-use super::stmt::Stmt;
+use super::stmt::{FuncContainer, Stmt};
 use super::token::{Token, TokenType};
 
 struct ParserState {
@@ -68,8 +68,10 @@ pub fn parse(tokens: Vec<Token>) -> Result<Vec<Stmt>, Error> {
 }
 
 fn declaration(state: &mut ParserState) -> Result<Option<Stmt>, Error> {
-    if match_any_token(state, &[TokenType::Fun]) {
-        function(state, "function").map(Stmt::into)
+    if match_any_token(state, &[TokenType::Class]) {
+        class_declaration(state).map(Stmt::into)
+    } else if match_any_token(state, &[TokenType::Fun]) {
+        function_declaration(state, "function").map(Stmt::into)
     } else if match_any_token(state, &[TokenType::Var]) {
         var_declaration(state).map(Stmt::into)
     } else {
@@ -84,7 +86,12 @@ fn declaration(state: &mut ParserState) -> Result<Option<Stmt>, Error> {
     })
 }
 
-fn function(state: &mut ParserState, kind: &str) -> Result<Stmt, Error> {
+fn function_declaration(state: &mut ParserState, kind: &str) -> Result<Stmt, Error> {
+    let func = function(state, kind)?;
+    Ok(Stmt::Function(func))
+}
+
+fn function(state: &mut ParserState, kind: &str) -> Result<FuncContainer, Error> {
     let name = consume(
         state,
         &TokenType::Identifier,
@@ -130,7 +137,12 @@ fn function(state: &mut ParserState, kind: &str) -> Result<Stmt, Error> {
     )?;
     let body: Vec<Stmt> = block(state)?;
 
-    Ok(Stmt::Function(name, parameters, body))
+    let func = FuncContainer {
+        name,
+        params: parameters,
+        body,
+    };
+    Ok(func)
 }
 
 fn var_declaration(state: &mut ParserState) -> Result<Stmt, Error> {
@@ -150,6 +162,30 @@ fn var_declaration(state: &mut ParserState) -> Result<Stmt, Error> {
     )?;
 
     Ok(Stmt::Var(name, initializer))
+}
+
+fn class_declaration(state: &mut ParserState) -> Result<Stmt, Error> {
+    let name = consume(state, &TokenType::Identifier, "Expect class name.")?;
+    consume(
+        state,
+        &TokenType::LeftBrace,
+        "Expect '{' before class body.",
+    )?;
+
+    let mut methods: Vec<FuncContainer> = vec![];
+
+    while !state.check(&TokenType::RightBrace) && !state.is_at_end() {
+        let func = function(state, "method")?;
+        methods.push(func);
+    }
+
+    consume(
+        state,
+        &TokenType::RightBrace,
+        "Expect '}' after class body.",
+    )?;
+
+    Ok(Stmt::Class(name, methods))
 }
 
 fn statement(state: &mut ParserState) -> Result<Stmt, Error> {
@@ -329,6 +365,8 @@ fn assignment(state: &mut ParserState) -> Result<Expr, Error> {
 
         if let Expr::Variable(token) = expr {
             return Ok(Expr::Assign(token, Box::new(value)));
+        } else if let Expr::Get(expr, name) = expr {
+            return Ok(Expr::Set(expr, name, Box::new(value)));
         }
 
         Err(Error::Report {
@@ -457,6 +495,13 @@ fn call(state: &mut ParserState) -> Result<Expr, Error> {
     loop {
         if match_any_token(state, &[TokenType::LeftParen]) {
             expr = finish_call(state, expr)?;
+        } else if match_any_token(state, &[TokenType::Dot]) {
+            let name = consume(
+                state,
+                &TokenType::Identifier,
+                "Expect property name after '.'.",
+            )?;
+            expr = Expr::Get(Box::new(expr), name);
         } else {
             return Ok(expr);
         }
@@ -503,6 +548,11 @@ fn primary(state: &mut ParserState) -> Result<Expr, Error> {
         ],
     ) {
         return Ok(Expr::Atomic(state.previous().try_into()?));
+    }
+
+    if match_any_token(state, &[TokenType::This]) {
+        let keyword = state.previous().to_owned();
+        return Ok(Expr::This(keyword));
     }
 
     if match_any_token(state, &[TokenType::Identifier]) {

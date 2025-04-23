@@ -1,12 +1,15 @@
+use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ordered_float::OrderedFloat;
 
 use super::environment::Environment;
 use super::error::Error;
-use super::expr::{BinaryOp, Expr, Function, Literal, LogicalOp, NativeFunction, UnaryOp};
+use super::expr::{
+    BinaryOp, Class, Expr, Function, Instance, Literal, LogicalOp, NativeFunction, UnaryOp,
+};
 use super::resolver::Locals;
-use super::stmt::Stmt;
+use super::stmt::{FuncContainer, Stmt};
 use super::token::Token;
 
 type ExecResult = Result<Option<Literal>, Error>;
@@ -65,18 +68,50 @@ fn execute(statement: &Stmt, state: &mut State) -> ExecResult {
             state.env.define(token.lexeme.clone(), &value);
             Ok(None)
         }
-        Stmt::Block(statements) => Ok(execute_block(statements, state)?),
+        Stmt::Block(statements) => {
+            let block_env = Environment::new_child(&state.env);
+            let mut block_state = State {
+                env: block_env,
+                locals: state.locals.clone(),
+            };
+
+            Ok(execute_block(statements, &mut block_state)?)
+        }
         Stmt::If(condition, then_branch, else_branch) => {
             Ok(execute_if(condition, then_branch, else_branch, state)?)
         }
         Stmt::While(condition, body) => Ok(execute_while(condition, body, state)?),
-        Stmt::Function(name, params, body) => Ok(execute_func(
+        Stmt::Function(FuncContainer { name, params, body }) => Ok(execute_func(
             name,
             params.to_owned(),
             body.to_owned(),
             state,
         )?),
         Stmt::Return(_, expr) => execute_return(expr, state).map(Option::from),
+        Stmt::Class(name, methods) => {
+            state.env.define(name.lexeme.clone(), &Literal::Nil);
+
+            let mut methods_def: HashMap<String, Function> = HashMap::new();
+
+            for method in methods {
+                let func = Function {
+                    params: method.params.to_owned(),
+                    name: method.name.to_owned(),
+                    body: method.body.to_owned(),
+                    closure: state.env.to_owned(),
+                };
+
+                methods_def.insert(method.name.lexeme.clone(), func);
+            }
+
+            let class: Class = Class {
+                name: name.lexeme.clone(),
+                methods: methods_def,
+            };
+            state.env.assign(name, &Literal::Class(class))?;
+
+            Ok(None)
+        }
     }
 }
 
@@ -86,11 +121,14 @@ fn evaluate(expr: &Expr, state: &mut State) -> EvalResult {
         Expr::Unary(op, expr) => evaluate_unary(op, expr, state),
         Expr::Binary(expr1, op, expr2) => evaluate_binary(op, expr1, expr2, state),
         Expr::Ternary(expr1, expr2, expr3) => evaluate_ternary(expr1, expr2, expr3, state),
+        Expr::Get(expr, name) => evaluate_get(expr, name, state),
+        Expr::Set(object, name, value) => evaluate_set(object, name, value, state),
         Expr::Grouping(expr) => evaluate(expr, state),
         Expr::Variable(token) => lookup_variable(token, state),
         Expr::Assign(token, expr) => evaluate_assign(token, expr, state),
         Expr::Logical(expr1, op, expr2) => evaluate_logical(op, expr1, expr2, state),
         Expr::Call(callee, arguments, paren) => evaluate_call(callee, arguments, paren, state),
+        Expr::This(keyword) => evaluate_this(keyword, state),
     }
 }
 
@@ -256,6 +294,34 @@ fn evaluate_ternary(expr1: &Expr, expr2: &Expr, expr3: &Expr, state: &mut State)
     }
 }
 
+fn evaluate_get(expr: &Expr, name: &Token, state: &mut State) -> EvalResult {
+    let result = evaluate(expr, state)?;
+
+    if let Literal::Instance(instance) = result {
+        instance.get(name)
+    } else {
+        Err(Error::Eval {
+            token: name.clone(),
+            message: "Only instances have properties.".to_string(),
+        })
+    }
+}
+
+fn evaluate_set(object: &Expr, name: &Token, value: &Expr, state: &mut State) -> EvalResult {
+    let mut eval_object = evaluate(object, state)?;
+
+    if let Literal::Instance(instance) = &mut eval_object {
+        let eval_value = evaluate(value, state)?;
+        instance.set(name, eval_value.clone());
+        Ok(eval_value)
+    } else {
+        Err(Error::Eval {
+            token: name.clone(),
+            message: "Only instances have fields.".to_string(),
+        })
+    }
+}
+
 fn evaluate_assign(token: &Token, expr: &Expr, state: &mut State) -> EvalResult {
     let value = evaluate(expr, state)?;
 
@@ -347,11 +413,19 @@ fn evaluate_call(
 
             Ok(result.unwrap_or(Literal::Nil))
         }
+        Literal::Class(class) => {
+            let instance = Instance::new(class);
+            Ok(Literal::Instance(instance))
+        }
         _ => Err(Error::Eval {
             token: end_token.clone(),
             message: "Can only call functions and classes.".to_string(),
         }),
     }
+}
+
+fn evaluate_this(keyword: &Token, state: &mut State) -> EvalResult {
+    lookup_variable(keyword, state)
 }
 
 fn execute_if(
@@ -373,14 +447,8 @@ fn execute_if(
 }
 
 fn execute_block(statements: &Vec<Stmt>, state: &mut State) -> ExecResult {
-    let block_env = Environment::new_child(&state.env);
-    let mut block_state = State {
-        env: block_env,
-        locals: state.locals.clone(),
-    };
-
     for stmt in statements {
-        let result = execute(stmt, &mut block_state)?;
+        let result = execute(stmt, state)?;
 
         if let Some(return_lit) = result {
             return Ok(Some(return_lit));
