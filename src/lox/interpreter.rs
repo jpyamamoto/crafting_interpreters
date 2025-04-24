@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -5,15 +6,14 @@ use ordered_float::OrderedFloat;
 
 use super::environment::Environment;
 use super::error::Error;
-use super::expr::{
-    BinaryOp, Class, Expr, Function, Instance, Literal, LogicalOp, NativeFunction, UnaryOp,
-};
+use super::expr::{BinaryOp, Expr, LogicalOp, UnaryOp};
+use super::literal::{Class, Function, Instance, Lit, Literal, NativeFunction};
 use super::resolver::Locals;
 use super::stmt::{FuncContainer, Stmt};
 use super::token::Token;
 
-type ExecResult = Result<Option<Literal>, Error>;
-type EvalResult = Result<Literal, Error>;
+type ExecResult = Result<Option<Lit>, Error>;
+type EvalResult = Result<Lit, Error>;
 
 struct State {
     env: Environment,
@@ -21,14 +21,14 @@ struct State {
 }
 
 pub fn interpret(statements: Vec<Stmt>, locals: Locals) -> ExecResult {
-    let mut env = Environment::new();
+    let env = Environment::new();
 
     env.define(
         "clock".to_string(),
-        &Literal::NativeFunction(NativeFunction {
-            arity: 0,
-            name: "clock".to_string(),
-            call: |_env, _args| {
+        Literal::NativeFunction(NativeFunction::new(
+            "clock".to_string(),
+            0,
+            |_env, _args| {
                 let start = SystemTime::now();
                 let seconds = start
                     .duration_since(UNIX_EPOCH)
@@ -36,7 +36,8 @@ pub fn interpret(statements: Vec<Stmt>, locals: Locals) -> ExecResult {
                     .unwrap_or_else(|t| -t.duration().as_secs_f64());
                 Ok(Literal::Number(seconds.into()))
             },
-        }),
+        ))
+        .into(),
     );
 
     let mut state = State { env, locals };
@@ -60,16 +61,16 @@ fn execute(statement: &Stmt, state: &mut State) -> ExecResult {
             Ok(None)
         }
         Stmt::Var(token, None) => {
-            state.env.define(token.lexeme.clone(), &Literal::Nil);
+            state.env.define(token.lexeme.clone(), Literal::Nil.into());
             Ok(None)
         }
         Stmt::Var(token, Some(expr)) => {
             let value = evaluate(expr, state)?;
-            state.env.define(token.lexeme.clone(), &value);
+            state.env.define(token.lexeme.clone(), value);
             Ok(None)
         }
         Stmt::Block(statements) => {
-            let block_env = Environment::new_child(&state.env);
+            let block_env = Environment::with_parent(state.env.clone());
             let mut block_state = State {
                 env: block_env,
                 locals: state.locals.clone(),
@@ -89,26 +90,23 @@ fn execute(statement: &Stmt, state: &mut State) -> ExecResult {
         )?),
         Stmt::Return(_, expr) => execute_return(expr, state).map(Option::from),
         Stmt::Class(name, methods) => {
-            state.env.define(name.lexeme.clone(), &Literal::Nil);
+            state.env.define(name.lexeme.clone(), Literal::Nil.into());
 
             let mut methods_def: HashMap<String, Function> = HashMap::new();
 
             for method in methods {
-                let func = Function {
-                    params: method.params.to_owned(),
-                    name: method.name.to_owned(),
-                    body: method.body.to_owned(),
-                    closure: state.env.to_owned(),
-                };
+                let func = Function::new(
+                    method.params.clone(),
+                    method.name.clone(),
+                    method.body.clone(),
+                    state.env.clone(),
+                );
 
                 methods_def.insert(method.name.lexeme.clone(), func);
             }
 
-            let class: Class = Class {
-                name: name.lexeme.clone(),
-                methods: methods_def,
-            };
-            state.env.assign(name, &Literal::Class(class))?;
+            let class = Class::new(name.lexeme.clone(), RefCell::new(methods_def));
+            state.env.assign(name, Literal::Class(class).into())?;
 
             Ok(None)
         }
@@ -132,37 +130,37 @@ fn evaluate(expr: &Expr, state: &mut State) -> EvalResult {
     }
 }
 
-fn evaluate_literal(literal: &Literal) -> EvalResult {
+fn evaluate_literal(literal: &Lit) -> EvalResult {
     Ok(literal.to_owned())
 }
 
 fn evaluate_unary(op: &UnaryOp, expr: &Expr, state: &mut State) -> EvalResult {
-    let right: Literal = evaluate(expr, state)?;
+    let right = evaluate(expr, state)?;
 
     match op {
         UnaryOp::Bang => {
             if is_truthy(&right) {
-                Ok(Literal::False)
+                Ok(Literal::False.into())
             } else {
-                Ok(Literal::True)
+                Ok(Literal::True.into())
             }
         }
-        UnaryOp::Minus(token) => {
-            if let Literal::Number(n) = right {
-                Ok(Literal::Number(-n))
+        UnaryOp::Minus(token) => right.with(|right_lit| {
+            if let Literal::Number(n) = right_lit {
+                Ok(Literal::Number(-n).into())
             } else {
                 Err(Error::Eval {
                     token: token.clone(),
                     message: "Invalid negation: not a number".into(),
                 })
             }
-        }
+        }),
     }
 }
 
 fn evaluate_binary(op: &BinaryOp, expr1: &Expr, expr2: &Expr, state: &mut State) -> EvalResult {
-    let left: Literal = evaluate(expr1, state)?;
-    let right: Literal = evaluate(expr2, state)?;
+    let left = evaluate(expr1, state)?;
+    let right = evaluate(expr2, state)?;
 
     match op {
         BinaryOp::Minus(token) => {
@@ -171,7 +169,7 @@ fn evaluate_binary(op: &BinaryOp, expr1: &Expr, expr2: &Expr, state: &mut State)
                 message: "Invalid subtraction: operands must be numbers".into(),
             })?;
 
-            Ok(Literal::Number(left_num - right_num))
+            Ok(Literal::Number(left_num - right_num).into())
         }
         BinaryOp::Slash(token) => {
             let (left_num, right_num) = retrieve_nums(left, right).ok_or(Error::Eval {
@@ -185,7 +183,7 @@ fn evaluate_binary(op: &BinaryOp, expr1: &Expr, expr2: &Expr, state: &mut State)
                     message: "Invalid division: division by zero".into(),
                 })
             } else {
-                Ok(Literal::Number(left_num / right_num))
+                Ok(Literal::Number(left_num / right_num).into())
             }
         }
         BinaryOp::Star(token) => {
@@ -194,34 +192,34 @@ fn evaluate_binary(op: &BinaryOp, expr1: &Expr, expr2: &Expr, state: &mut State)
                 message: "Invalid multiplication: operands must be numbers".into(),
             })?;
 
-            Ok(Literal::Number(left_num * right_num))
+            Ok(Literal::Number(left_num * right_num).into())
         }
-        BinaryOp::Plus(token) => match left {
-            Literal::Number(left_num) => {
-                if let Literal::Number(right_num) = right {
-                    Ok(Literal::Number(left_num + right_num))
+        BinaryOp::Plus(token) => left.with(|left_lit| match left_lit {
+            Literal::Number(left_num) => right.with(|right_lit| {
+                if let Literal::Number(right_num) = right_lit {
+                    Ok(Literal::Number(left_num + right_num).into())
                 } else {
                     Err(Error::Eval {
                         token: token.clone(),
                         message: "Invalid addition: operands must be numbers".into(),
                     })
                 }
-            }
-            Literal::String(left_str) => {
-                if let Literal::String(right_str) = right {
-                    Ok(Literal::String(left_str + &right_str))
+            }),
+            Literal::String(left_str) => right.with(|right_lit| {
+                if let Literal::String(right_str) = right_lit {
+                    Ok(Literal::String(left_str.to_owned() + right_str).into())
                 } else {
                     Err(Error::Eval {
                         token: token.clone(),
                         message: "Invalid concatenation: operands must be strings".into(),
                     })
                 }
-            }
+            }),
             _ => Err(Error::Eval {
                 token: token.clone(),
                 message: "Invalid addition: operands must be numbers".into(),
             }),
-        },
+        }),
         BinaryOp::Greater(token) => {
             let (left_num, right_num) = retrieve_nums(left, right).ok_or(Error::Eval {
                 token: token.clone(),
@@ -229,9 +227,9 @@ fn evaluate_binary(op: &BinaryOp, expr1: &Expr, expr2: &Expr, state: &mut State)
             })?;
 
             Ok(if left_num > right_num {
-                Literal::True
+                Literal::True.into()
             } else {
-                Literal::False
+                Literal::False.into()
             })
         }
         BinaryOp::GreaterEqual(token) => {
@@ -241,9 +239,9 @@ fn evaluate_binary(op: &BinaryOp, expr1: &Expr, expr2: &Expr, state: &mut State)
             })?;
 
             Ok(if left_num >= right_num {
-                Literal::True
+                Literal::True.into()
             } else {
-                Literal::False
+                Literal::False.into()
             })
         }
         BinaryOp::Less(token) => {
@@ -253,9 +251,9 @@ fn evaluate_binary(op: &BinaryOp, expr1: &Expr, expr2: &Expr, state: &mut State)
             })?;
 
             Ok(if left_num < right_num {
-                Literal::True
+                Literal::True.into()
             } else {
-                Literal::False
+                Literal::False.into()
             })
         }
         BinaryOp::LessEqual(token) => {
@@ -265,27 +263,27 @@ fn evaluate_binary(op: &BinaryOp, expr1: &Expr, expr2: &Expr, state: &mut State)
             })?;
 
             Ok(if left_num <= right_num {
-                Literal::True
+                Literal::True.into()
             } else {
-                Literal::False
+                Literal::False.into()
             })
         }
         BinaryOp::BangEqual => Ok(if !is_equal(&left, &right) {
-            Literal::True
+            Literal::True.into()
         } else {
-            Literal::False
+            Literal::False.into()
         }),
         BinaryOp::EqualEqual => Ok(if is_equal(&left, &right) {
-            Literal::True
+            Literal::True.into()
         } else {
-            Literal::False
+            Literal::False.into()
         }),
         BinaryOp::Comma => Ok(right),
     }
 }
 
 fn evaluate_ternary(expr1: &Expr, expr2: &Expr, expr3: &Expr, state: &mut State) -> EvalResult {
-    let guard: Literal = evaluate(expr1, state)?;
+    let guard = evaluate(expr1, state)?;
 
     if is_truthy(&guard) {
         evaluate(expr2, state)
@@ -297,38 +295,42 @@ fn evaluate_ternary(expr1: &Expr, expr2: &Expr, expr3: &Expr, state: &mut State)
 fn evaluate_get(expr: &Expr, name: &Token, state: &mut State) -> EvalResult {
     let result = evaluate(expr, state)?;
 
-    if let Literal::Instance(instance) = result {
-        instance.get(name)
-    } else {
-        Err(Error::Eval {
-            token: name.clone(),
-            message: "Only instances have properties.".to_string(),
-        })
-    }
+    result.with(|result_lit| {
+        if let Literal::Instance(instance) = result_lit {
+            instance.get(name)
+        } else {
+            Err(Error::Eval {
+                token: name.clone(),
+                message: "Only instances have properties.".to_string(),
+            })
+        }
+    })
 }
 
 fn evaluate_set(object: &Expr, name: &Token, value: &Expr, state: &mut State) -> EvalResult {
-    let mut eval_object = evaluate(object, state)?;
+    let eval_object = evaluate(object, state)?;
 
-    if let Literal::Instance(instance) = &mut eval_object {
-        let eval_value = evaluate(value, state)?;
-        instance.set(name, eval_value.clone());
-        Ok(eval_value)
-    } else {
-        Err(Error::Eval {
-            token: name.clone(),
-            message: "Only instances have fields.".to_string(),
-        })
-    }
+    eval_object.with_mut(|lit_object| {
+        if let Literal::Instance(instance) = lit_object {
+            let eval_value = evaluate(value, state)?;
+            instance.set(name, eval_value.clone());
+            Ok(eval_value)
+        } else {
+            Err(Error::Eval {
+                token: name.clone(),
+                message: "Only instances have fields.".to_string(),
+            })
+        }
+    })
 }
 
 fn evaluate_assign(token: &Token, expr: &Expr, state: &mut State) -> EvalResult {
     let value = evaluate(expr, state)?;
 
     if let Some(distance) = state.locals.get(token) {
-        state.env.assign_at(*distance, token, &value)?;
+        state.env.assign_at(*distance, token, value.clone())?;
     } else {
-        state.env.get_globals().assign(token, &value)?;
+        state.env.get_globals().assign(token, value.clone())?;
     }
 
     Ok(value)
@@ -363,14 +365,14 @@ fn evaluate_call(
 ) -> EvalResult {
     let callee = evaluate(callee_expr, state)?;
 
-    let mut arguments: Vec<Literal> = vec![];
+    let mut arguments: Vec<Lit> = vec![];
 
     for arg_expr in arguments_expr {
         let arg = evaluate(arg_expr, state)?;
         arguments.push(arg);
     }
 
-    match callee {
+    callee.with(|callee_lit| match callee_lit {
         Literal::NativeFunction(callable) => {
             if callable.arity != arguments.len() {
                 Err(Error::Eval {
@@ -382,26 +384,27 @@ fn evaluate_call(
                     ),
                 })
             } else {
-                (callable.call)(&mut state.env, arguments)
+                let result = (callable.call)(&mut state.env, arguments);
+                result.map(Lit::from)
             }
         }
-        Literal::Function(callable) => {
-            if callable.params.len() != arguments.len() {
+        Literal::Function(callable) => callable.with(|callable_lit| {
+            if callable_lit.params.len() != arguments.len() {
                 return Err(Error::Eval {
                     token: end_token.clone(),
                     message: format!(
                         "Expected {} arguments but got {}.",
-                        callable.params.len(),
+                        callable_lit.params.len(),
                         arguments.len()
                     ),
                 });
             }
 
-            let parent = callable.closure;
-            let mut env = Environment::new_child(&parent);
+            let parent = callable_lit.closure.clone();
+            let env = Environment::with_parent(parent);
 
-            for (param, arg) in callable.params.iter().zip(arguments) {
-                env.define(param.lexeme.clone(), &arg);
+            for (param, arg) in callable_lit.params.iter().zip(arguments) {
+                env.define(param.lexeme.clone(), arg);
             }
 
             let mut new_state = State {
@@ -409,19 +412,19 @@ fn evaluate_call(
                 locals: state.locals.clone(),
             };
 
-            let result = execute_block(&callable.body, &mut new_state)?;
+            let result = execute_block(&callable_lit.body, &mut new_state)?;
 
-            Ok(result.unwrap_or(Literal::Nil))
-        }
+            Ok(result.unwrap_or(Literal::Nil.into()))
+        }),
         Literal::Class(class) => {
-            let instance = Instance::new(class);
-            Ok(Literal::Instance(instance))
+            let instance = Instance::new(class.clone());
+            Ok(Literal::Instance(instance).into())
         }
         _ => Err(Error::Eval {
             token: end_token.clone(),
             message: "Can only call functions and classes.".to_string(),
         }),
-    }
+    })
 }
 
 fn evaluate_this(keyword: &Token, state: &mut State) -> EvalResult {
@@ -476,16 +479,11 @@ fn execute_func(
     body: Vec<Stmt>,
     state: &mut State,
 ) -> ExecResult {
-    let func = Function {
-        params,
-        name: name.to_owned(),
-        body,
-        closure: state.env.to_owned(),
-    };
+    let func = Function::new(params, name.to_owned(), body, state.env.clone());
 
     state
         .env
-        .define(name.lexeme.clone(), &Literal::Function(func));
+        .define(name.lexeme.clone(), Literal::Function(func).into());
     Ok(None)
 }
 
@@ -498,32 +496,40 @@ fn lookup_variable(name: &Token, state: &mut State) -> EvalResult {
 
     match distance {
         Some(d) => state.env.get_at(*d, name),
-        None => state.env.get_globals().get(name),
+        None => state.env.clone().get_globals().get(name),
     }
 }
 
-fn is_truthy(expr: &Literal) -> bool {
-    !matches!(expr, Literal::Nil | Literal::False)
+fn is_truthy(expr: &Lit) -> bool {
+    expr.with(|expr_lit| !matches!(expr_lit, Literal::Nil | Literal::False))
 }
 
-fn retrieve_nums(expr1: Literal, expr2: Literal) -> Option<(OrderedFloat<f64>, OrderedFloat<f64>)> {
-    if let (Literal::Number(expr1_num), Literal::Number(expr2_num)) = (expr1, expr2) {
-        Some((expr1_num, expr2_num))
-    } else {
-        None
-    }
+fn retrieve_nums(expr1: Lit, expr2: Lit) -> Option<(OrderedFloat<f64>, OrderedFloat<f64>)> {
+    expr1.with(|lit1| {
+        expr2.with(|lit2| {
+            if let (Literal::Number(expr1_num), Literal::Number(expr2_num)) = (lit1, lit2) {
+                Some((expr1_num.to_owned(), expr2_num.to_owned()))
+            } else {
+                None
+            }
+        })
+    })
 }
 
-fn is_equal(left: &Literal, right: &Literal) -> bool {
+fn is_equal(left: &Lit, right: &Lit) -> bool {
     // This function implements the same behaviour of Java (the language of the original Lox
     // implementation) when dealing with floating-point numbers.
-    if let (Literal::Number(left_num), Literal::Number(right_num)) = (left, right) {
-        if left_num.is_nan() && right_num.is_nan() {
-            true
-        } else {
-            left_num.to_bits() == right_num.to_bits()
-        }
-    } else {
-        left == right
-    }
+    left.with(|left_lit| {
+        right.with(|right_lit| {
+            if let (Literal::Number(left_num), Literal::Number(right_num)) = (left_lit, right_lit) {
+                if left_num.is_nan() && right_num.is_nan() {
+                    true
+                } else {
+                    left_num.to_bits() == right_num.to_bits()
+                }
+            } else {
+                left_lit == right_lit
+            }
+        })
+    })
 }

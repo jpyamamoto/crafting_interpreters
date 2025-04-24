@@ -2,6 +2,7 @@ pub mod environment;
 pub mod error;
 pub mod expr;
 pub mod interpreter;
+pub mod literal;
 pub mod parser;
 pub mod resolver;
 pub mod scanner;

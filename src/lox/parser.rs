@@ -1,5 +1,6 @@
 use super::error::Error;
-use super::expr::{BinaryOp, Expr, Literal, UnaryOp};
+use super::expr::{BinaryOp, Expr, UnaryOp};
+use super::literal::Literal;
 use super::stmt::{FuncContainer, Stmt};
 use super::token::{Token, TokenType};
 
@@ -231,7 +232,7 @@ fn for_statement(state: &mut ParserState) -> Result<Stmt, Error> {
     let condition = if !state.check(&TokenType::Semicolon) {
         expression(state)?
     } else {
-        Expr::Atomic(Literal::True)
+        Expr::Atomic(Literal::True.into())
     };
 
     consume(
@@ -320,7 +321,7 @@ fn return_statement(state: &mut ParserState) -> Result<Stmt, Error> {
     let value = if !state.check(&TokenType::Semicolon) {
         expression(state)?
     } else {
-        Expr::Atomic(Literal::Nil)
+        Expr::Atomic(Literal::Nil.into())
     };
 
     consume(
@@ -547,7 +548,8 @@ fn primary(state: &mut ParserState) -> Result<Expr, Error> {
             TokenType::String,
         ],
     ) {
-        return Ok(Expr::Atomic(state.previous().try_into()?));
+        let prev_lit: Literal = state.previous().try_into()?;
+        return Ok(Expr::Atomic(prev_lit.into()));
     }
 
     if match_any_token(state, &[TokenType::This]) {

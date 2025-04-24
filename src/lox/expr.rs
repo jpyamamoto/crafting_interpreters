@@ -1,14 +1,9 @@
-use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::Display;
-use std::rc::Rc;
 
-use ordered_float::OrderedFloat;
-
-use super::environment::Environment;
 use super::error::Error;
-use super::stmt::Stmt;
-use super::token::{InternalValue, Token, TokenType};
+use super::literal::Lit;
+use super::token::{Token, TokenType};
 
 #[derive(Clone, Debug)]
 pub enum Expr {
@@ -20,7 +15,7 @@ pub enum Expr {
 
     // Analog to Literal, since we're not using a separate type to represent the
     // values held by literals.
-    Atomic(Literal),
+    Atomic(Lit),
     Logical(Box<Expr>, LogicalOp, Box<Expr>),
     Unary(UnaryOp, Box<Expr>),
     Ternary(Box<Expr>, Box<Expr>, Box<Expr>),
@@ -55,102 +50,6 @@ pub enum LogicalOp {
 pub enum UnaryOp {
     Bang,
     Minus(Token),
-}
-
-#[derive(Debug, Clone)]
-pub struct NativeFunction {
-    pub arity: usize,
-    pub name: String,
-    pub call: fn(&mut Environment, Vec<Literal>) -> Result<Literal, Error>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Function {
-    pub params: Vec<Token>,
-    pub name: Token,
-    pub body: Vec<Stmt>,
-    pub closure: Environment,
-}
-
-impl Function {
-    pub fn bind(self, instance: Instance) -> Function {
-        let mut environment = Environment::new_child(&self.closure);
-        environment.define("this".to_string(), &Literal::Instance(instance));
-
-        Function {
-            params: self.params,
-            name: self.name,
-            body: self.body,
-            closure: environment,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Class {
-    pub name: String,
-    pub methods: HashMap<String, Function>,
-}
-
-impl Class {
-    pub fn find_method(&self, name: String) -> Option<Function> {
-        self.methods.get(&name).map(Function::to_owned)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Instance {
-    pub class: Rc<Class>,
-    pub fields: HashMap<String, Literal>,
-}
-
-impl Instance {
-    pub fn new(class: Class) -> Instance {
-        Instance {
-            class: Rc::new(class),
-            fields: HashMap::new(),
-        }
-    }
-
-    pub fn get(self, name: &Token) -> Result<Literal, Error> {
-        if name.lexeme == "flavor" {
-            println!("Get: {:?}", self);
-        }
-
-        if let Some(field) = self.fields.get(&name.lexeme) {
-            return Ok(field.clone());
-        }
-
-        let method = self.class.find_method(name.lexeme.clone());
-
-        if let Some(method) = method {
-            let func = method.bind(self);
-            Ok(Literal::Function(func))
-        } else {
-            Err(Error::Eval {
-                token: name.clone(),
-                message: format!("Undefined property '{}'.", name.lexeme),
-            })
-        }
-    }
-
-    pub fn set(&mut self, name: &Token, value: Literal) {
-        self.fields.insert(name.lexeme.clone(), value);
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum Literal {
-    Identifier(String),
-    String(String),
-    Number(OrderedFloat<f64>),
-    True,
-    False,
-    Nil,
-    NativeFunction(NativeFunction),
-    Function(Function),
-    Class(Class),
-    Instance(Instance),
 }
 
 impl Display for Expr {
@@ -261,84 +160,6 @@ impl Display for LogicalOp {
     }
 }
 
-impl Display for Literal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Literal::Identifier(identifier) => write!(f, "{}", identifier),
-            Literal::String(string) => write!(f, "{}", string),
-            Literal::Number(number) => write!(f, "{}", number),
-            Literal::True => write!(f, "true"),
-            Literal::False => write!(f, "false"),
-            Literal::Nil => write!(f, "nil"),
-            Literal::NativeFunction(native_func) => write!(f, "{}", native_func.name),
-            Literal::Function(func) => write!(f, "<fn {}>", func.name.lexeme),
-            Literal::Class(class) => write!(f, "<class {}>", class.name),
-            Literal::Instance(instance) => write!(f, "<instance {}>", instance.class.name),
-        }
-    }
-}
-
-impl PartialEq for Literal {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Identifier(l), Self::Identifier(r)) => l == r,
-            (Self::String(l), Self::String(r)) => l == r,
-            (Self::Number(l), Self::Number(r)) => l == r,
-            (Self::True, Self::True) => true,
-            (Self::False, Self::False) => true,
-            (Self::Nil, Self::Nil) => true,
-            (Self::NativeFunction(l), Self::NativeFunction(r)) => l.name == r.name,
-            _ => false,
-        }
-    }
-}
-
-impl TryFrom<&Token> for Literal {
-    type Error = Error;
-
-    fn try_from(token: &Token) -> Result<Self, Self::Error> {
-        match &token.type_token {
-            TokenType::Identifier => {
-                if let Some(InternalValue::Text(value)) = &token.value {
-                    Ok(Literal::Identifier(value.clone()))
-                } else {
-                    Err(Error::Parse {
-                        token: token.clone(),
-                        message: "Can't retrieve variable name".to_string(),
-                    })
-                }
-            }
-            TokenType::String => {
-                if let Some(InternalValue::Text(value)) = &token.value {
-                    Ok(Literal::String(value.clone()))
-                } else {
-                    Err(Error::Parse {
-                        token: token.clone(),
-                        message: "Can't retrieve string content".to_string(),
-                    })
-                }
-            }
-            TokenType::Number => {
-                if let Some(InternalValue::Number(value)) = token.value {
-                    Ok(Literal::Number(value))
-                } else {
-                    Err(Error::Parse {
-                        token: token.clone(),
-                        message: "Can't retrieve number value".to_string(),
-                    })
-                }
-            }
-            TokenType::False => Ok(Literal::False),
-            TokenType::True => Ok(Literal::True),
-            TokenType::Nil => Ok(Literal::Nil),
-            _ => Err(Error::Parse {
-                token: token.clone(),
-                message: "Not a literal".to_string(),
-            }),
-        }
-    }
-}
-
 impl TryFrom<&Token> for UnaryOp {
     type Error = Error;
 
@@ -398,7 +219,8 @@ mod tests {
     use ordered_float::OrderedFloat;
 
     use crate::lox::{
-        expr::{BinaryOp, Expr, Literal, UnaryOp},
+        expr::{BinaryOp, Expr, UnaryOp},
+        literal::Literal,
         token::{Token, TokenType},
     };
 
@@ -412,7 +234,7 @@ mod tests {
                     line: 1,
                     value: None,
                 }),
-                Box::new(Expr::Atomic(Literal::Number(OrderedFloat(123.0)))),
+                Box::new(Expr::Atomic(Literal::Number(OrderedFloat(123.0)).into())),
             )),
             BinaryOp::Star(Token {
                 type_token: TokenType::Star,
@@ -420,9 +242,9 @@ mod tests {
                 line: 1,
                 value: None,
             }),
-            Box::new(Expr::Grouping(Box::new(Expr::Atomic(Literal::Number(
-                OrderedFloat(45.67),
-            ))))),
+            Box::new(Expr::Grouping(Box::new(Expr::Atomic(
+                Literal::Number(OrderedFloat(45.67)).into(),
+            )))),
         );
 
         assert_eq!(format!("{}", expr), "(* (- 123) (group 45.67))");
