@@ -10,17 +10,25 @@ use super::{
 type Scope = HashMap<String, bool>;
 pub type Locals = HashMap<Token, usize>;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FunctionType {
     None,
     Function,
+    Initializer,
     Method,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ClassType {
+    None,
+    Class,
 }
 
 struct State {
     scopes: Vec<Scope>,
     locals: Locals,
     current_function: FunctionType,
+    current_class: ClassType,
 }
 
 pub fn resolve(statements: &Vec<Stmt>) -> Result<Locals, Error> {
@@ -28,6 +36,7 @@ pub fn resolve(statements: &Vec<Stmt>) -> Result<Locals, Error> {
         scopes: vec![],
         locals: HashMap::new(),
         current_function: FunctionType::None,
+        current_class: ClassType::None,
     };
 
     resolve_many(statements, &mut state).map(|_| state.locals)
@@ -90,9 +99,23 @@ fn resolve_stmt(statement: &Stmt, state: &mut State) -> Result<(), Error> {
                 });
             };
 
-            resolve_expr(expr, state)
+            if let Some(some_expr) = expr {
+                if state.current_function == FunctionType::Initializer {
+                    return Err(Error::Report {
+                        token: keyword.clone(),
+                        message: "Can't return a value from an initializer.".to_string(),
+                    });
+                }
+
+                resolve_expr(some_expr, state)?;
+            }
+
+            Ok(())
         }
         Stmt::Class(name, methods) => {
+            let enclosing_class = state.current_class;
+            state.current_class = ClassType::Class;
+
             declare(name, state)?;
             define(name, state);
 
@@ -103,10 +126,17 @@ fn resolve_stmt(statement: &Stmt, state: &mut State) -> Result<(), Error> {
             }
 
             for method in methods {
-                resolve_function(&method.params, &method.body, state, FunctionType::Method)?;
+                let declaration = if method.name.lexeme == "init" {
+                    FunctionType::Initializer
+                } else {
+                    FunctionType::Method
+                };
+                resolve_function(&method.params, &method.body, state, declaration)?;
             }
 
             end_scope(state);
+
+            state.current_class = enclosing_class;
 
             Ok(())
         }
@@ -166,7 +196,16 @@ fn resolve_expr(expr: &Expr, state: &mut State) -> Result<(), Error> {
 
             Ok(())
         }
-        Expr::This(token) => resolve_local(token, state),
+        Expr::This(token) => {
+            if state.current_class == ClassType::None {
+                Err(Error::Report {
+                    token: token.clone(),
+                    message: "Can't use 'this' outside of a class.".to_string(),
+                })
+            } else {
+                resolve_local(token, state)
+            }
+        }
     }
 }
 

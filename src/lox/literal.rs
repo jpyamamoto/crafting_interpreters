@@ -48,6 +48,7 @@ pub struct FunctionDesc {
     pub params: Vec<Token>,
     pub body: Vec<Stmt>,
     pub closure: Environment,
+    pub is_initializer: bool,
 }
 
 #[derive(Debug)]
@@ -73,12 +74,19 @@ impl Lit {
 }
 
 impl Function {
-    pub fn new(params: Vec<Token>, name: Token, body: Vec<Stmt>, closure: Environment) -> Self {
+    pub fn new(
+        params: Vec<Token>,
+        name: Token,
+        is_initializer: bool,
+        body: Vec<Stmt>,
+        closure: Environment,
+    ) -> Self {
         FunctionDesc {
             name,
             params,
             body,
             closure,
+            is_initializer,
         }
         .into()
     }
@@ -103,6 +111,14 @@ impl Class {
     }
     pub fn with<R>(&self, f: impl FnOnce(&ClassDesc) -> R) -> R {
         f(&self.0.borrow())
+    }
+
+    pub fn arity(&self) -> usize {
+        if let Some(initializer) = self.find_method("init".to_string()) {
+            initializer.with(|i| i.params.len())
+        } else {
+            0
+        }
     }
 }
 
@@ -166,6 +182,7 @@ impl FunctionDesc {
         FunctionDesc {
             params: self.params.clone(),
             name: self.name.clone(),
+            is_initializer: self.is_initializer,
             body: self.body.clone(),
             closure: environment,
         }

@@ -10,7 +10,7 @@ use super::expr::{BinaryOp, Expr, LogicalOp, UnaryOp};
 use super::literal::{Class, Function, Instance, Lit, Literal, NativeFunction};
 use super::resolver::Locals;
 use super::stmt::{FuncContainer, Stmt};
-use super::token::Token;
+use super::token::{Token, TokenType};
 
 type ExecResult = Result<Option<Lit>, Error>;
 type EvalResult = Result<Lit, Error>;
@@ -98,6 +98,7 @@ fn execute(statement: &Stmt, state: &mut State) -> ExecResult {
                 let func = Function::new(
                     method.params.clone(),
                     method.name.clone(),
+                    method.name.lexeme == "init",
                     method.body.clone(),
                     state.env.clone(),
                 );
@@ -388,36 +389,28 @@ fn evaluate_call(
                 result.map(Lit::from)
             }
         }
-        Literal::Function(callable) => callable.with(|callable_lit| {
-            if callable_lit.params.len() != arguments.len() {
+        Literal::Function(callable) => call_function(callable, arguments, end_token, state),
+        Literal::Class(class) => {
+            let class_arity = class.arity();
+
+            if class_arity != arguments.len() {
                 return Err(Error::Eval {
                     token: end_token.clone(),
                     message: format!(
                         "Expected {} arguments but got {}.",
-                        callable_lit.params.len(),
+                        class_arity,
                         arguments.len()
                     ),
                 });
             }
 
-            let parent = callable_lit.closure.clone();
-            let env = Environment::with_parent(parent);
+            let instance = Instance::new(class.clone());
 
-            for (param, arg) in callable_lit.params.iter().zip(arguments) {
-                env.define(param.lexeme.clone(), arg);
+            if let Some(initializer) = class.find_method("init".to_string()) {
+                let func: Function = initializer.with(|i| i.bind(instance.clone())).into();
+                call_function(&func, arguments, end_token, state)?;
             }
 
-            let mut new_state = State {
-                env,
-                locals: state.locals.clone(),
-            };
-
-            let result = execute_block(&callable_lit.body, &mut new_state)?;
-
-            Ok(result.unwrap_or(Literal::Nil.into()))
-        }),
-        Literal::Class(class) => {
-            let instance = Instance::new(class.clone());
             Ok(Literal::Instance(instance).into())
         }
         _ => Err(Error::Eval {
@@ -479,7 +472,7 @@ fn execute_func(
     body: Vec<Stmt>,
     state: &mut State,
 ) -> ExecResult {
-    let func = Function::new(params, name.to_owned(), body, state.env.clone());
+    let func = Function::new(params, name.to_owned(), false, body, state.env.clone());
 
     state
         .env
@@ -487,8 +480,60 @@ fn execute_func(
     Ok(None)
 }
 
-fn execute_return(expr: &Expr, state: &mut State) -> ExecResult {
-    evaluate(expr, state).map(Option::from)
+fn execute_return(expr: &Option<Box<Expr>>, state: &mut State) -> ExecResult {
+    if let Some(some_expr) = expr {
+        evaluate(some_expr, state).map(Option::from)
+    } else {
+        Ok(None)
+    }
+}
+
+fn call_function(
+    callable: &Function,
+    arguments: Vec<Lit>,
+    end_token: &Token,
+    state: &mut State,
+) -> EvalResult {
+    callable.with(|callable_lit| {
+        if callable_lit.params.len() != arguments.len() {
+            return Err(Error::Eval {
+                token: end_token.clone(),
+                message: format!(
+                    "Expected {} arguments but got {}.",
+                    callable_lit.params.len(),
+                    arguments.len()
+                ),
+            });
+        }
+
+        let parent = callable_lit.closure.clone();
+        let env = Environment::with_parent(parent);
+
+        for (param, arg) in callable_lit.params.iter().zip(arguments) {
+            env.define(param.lexeme.clone(), arg);
+        }
+
+        let mut new_state = State {
+            env,
+            locals: state.locals.clone(),
+        };
+
+        let result = execute_block(&callable_lit.body, &mut new_state)?;
+
+        if callable_lit.is_initializer {
+            callable_lit.closure.get_at(
+                0,
+                &Token {
+                    type_token: TokenType::This,
+                    lexeme: "this".to_string(),
+                    line: end_token.line,
+                    value: None,
+                },
+            )
+        } else {
+            Ok(result.unwrap_or(Literal::Nil.into()))
+        }
+    })
 }
 
 fn lookup_variable(name: &Token, state: &mut State) -> EvalResult {

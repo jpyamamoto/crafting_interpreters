@@ -319,9 +319,9 @@ fn return_statement(state: &mut ParserState) -> Result<Stmt, Error> {
     let keyword = state.previous().to_owned();
 
     let value = if !state.check(&TokenType::Semicolon) {
-        expression(state)?
+        Some(Box::new(expression(state)?))
     } else {
-        Expr::Atomic(Literal::Nil.into())
+        None
     };
 
     consume(
@@ -330,7 +330,7 @@ fn return_statement(state: &mut ParserState) -> Result<Stmt, Error> {
         "Expect ';' after return value.",
     )?;
 
-    Ok(Stmt::Return(keyword, Box::new(value)))
+    Ok(Stmt::Return(keyword, value))
 }
 
 fn expression_statement(state: &mut ParserState) -> Result<Stmt, Error> {

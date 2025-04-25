@@ -12,7 +12,7 @@ pub struct FuncContainer {
 pub enum Stmt {
     Expr(Box<Expr>),
     Print(Box<Expr>),
-    Return(Token, Box<Expr>),
+    Return(Token, Option<Box<Expr>>),
     Var(Token, Option<Box<Expr>>),
     Block(Vec<Stmt>),
     If(Box<Expr>, Box<Stmt>, Option<Box<Stmt>>),
@@ -26,7 +26,8 @@ impl Display for Stmt {
         match self {
             Stmt::Expr(expr) => write!(f, "{};", expr),
             Stmt::Print(expr) => write!(f, "print {};", expr),
-            Stmt::Return(token, expr) => write!(f, "{} {};", token.lexeme, expr),
+            Stmt::Return(token, None) => write!(f, "{};", token.lexeme),
+            Stmt::Return(token, Some(expr)) => write!(f, "{} {};", token.lexeme, expr),
             Stmt::Var(token, None) => write!(f, "{};", token.lexeme),
             Stmt::Var(token, Some(expr)) => write!(f, "var {} = {};", token.lexeme, expr),
             Stmt::Block(statements) => {
