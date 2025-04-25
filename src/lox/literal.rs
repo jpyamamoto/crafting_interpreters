@@ -55,6 +55,7 @@ pub struct FunctionDesc {
 pub struct ClassDesc {
     name: String,
     pub methods: RefCell<HashMap<String, Function>>,
+    pub superclass: Option<Class>,
 }
 
 #[derive(Debug)]
@@ -97,8 +98,17 @@ impl Function {
 }
 
 impl Class {
-    pub fn new(name: String, methods: RefCell<HashMap<String, Function>>) -> Self {
-        ClassDesc { name, methods }.into()
+    pub fn new(
+        name: String,
+        methods: RefCell<HashMap<String, Function>>,
+        superclass: Option<Class>,
+    ) -> Self {
+        ClassDesc {
+            name,
+            methods,
+            superclass,
+        }
+        .into()
     }
 
     pub fn find_method(&self, name: String) -> Option<Function> {
@@ -108,6 +118,13 @@ impl Class {
             .borrow()
             .get(&name)
             .map(Function::to_owned)
+            .or_else(|| {
+                if let Some(superclass) = self.with(|c| c.superclass.clone()) {
+                    superclass.find_method(name)
+                } else {
+                    None
+                }
+            })
     }
     pub fn with<R>(&self, f: impl FnOnce(&ClassDesc) -> R) -> R {
         f(&self.0.borrow())

@@ -2,7 +2,7 @@ use std::hash::Hash;
 
 use ordered_float::OrderedFloat;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Copy)]
 pub enum TokenType {
     LeftParen, RightParen, LeftBrace, RightBrace,
     Comma, Dot, Minus, Plus, Semicolon, Slash, Star,

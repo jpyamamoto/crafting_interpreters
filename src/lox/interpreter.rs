@@ -89,8 +89,34 @@ fn execute(statement: &Stmt, state: &mut State) -> ExecResult {
             state,
         )?),
         Stmt::Return(_, expr) => execute_return(expr, state).map(Option::from),
-        Stmt::Class(name, methods) => {
+        Stmt::Class(name, methods, superclass) => {
+            let actual_superclass: Option<Class> = if let Some(superclass_token) = superclass {
+                let object = evaluate(&Expr::Variable(superclass_token.clone()), state)?;
+
+                object.with(|object_lit| {
+                    if let Literal::Class(superclass_class) = object_lit {
+                        Ok(Some(superclass_class.clone()))
+                    } else {
+                        Err(Error::Eval {
+                            token: superclass_token.clone(),
+                            message: "Superclass must be a class.".to_string(),
+                        })
+                    }
+                })
+            } else {
+                Ok(None)
+            }?;
+
             state.env.define(name.lexeme.clone(), Literal::Nil.into());
+
+            if let Some(some_superclass) = &actual_superclass {
+                let environment = Environment::with_parent(state.env.clone());
+                environment.define(
+                    "super".to_string(),
+                    Literal::Class(some_superclass.clone()).into(),
+                );
+                state.env = environment;
+            }
 
             let mut methods_def: HashMap<String, Function> = HashMap::new();
 
@@ -106,7 +132,18 @@ fn execute(statement: &Stmt, state: &mut State) -> ExecResult {
                 methods_def.insert(method.name.lexeme.clone(), func);
             }
 
-            let class = Class::new(name.lexeme.clone(), RefCell::new(methods_def));
+            let class = Class::new(
+                name.lexeme.clone(),
+                RefCell::new(methods_def),
+                actual_superclass,
+            );
+
+            if superclass.is_some() {
+                // This is safe because when a superclass is present a new context is always
+                // introduced.
+                state.env = state.env.enclosing().unwrap();
+            }
+
             state.env.assign(name, Literal::Class(class).into())?;
 
             Ok(None)
@@ -128,6 +165,7 @@ fn evaluate(expr: &Expr, state: &mut State) -> EvalResult {
         Expr::Logical(expr1, op, expr2) => evaluate_logical(op, expr1, expr2, state),
         Expr::Call(callee, arguments, paren) => evaluate_call(callee, arguments, paren, state),
         Expr::This(keyword) => evaluate_this(keyword, state),
+        Expr::Super(keyword, method) => evaluate_super(keyword, method, state),
     }
 }
 
@@ -422,6 +460,52 @@ fn evaluate_call(
 
 fn evaluate_this(keyword: &Token, state: &mut State) -> EvalResult {
     lookup_variable(keyword, state)
+}
+
+fn evaluate_super(keyword: &Token, method: &Token, state: &mut State) -> EvalResult {
+    if let Some(distance) = state.locals.get(keyword) {
+        let superclass = state.env.get_at(*distance, keyword)?;
+        let object = state.env.get_at(
+            distance - 1,
+            &Token {
+                type_token: TokenType::This,
+                lexeme: "this".to_string(),
+                line: keyword.line,
+                value: None,
+            },
+        )?;
+        let method_func = superclass
+            .with(|superclass_lit| {
+                if let Literal::Class(superclass_class) = superclass_lit {
+                    superclass_class.find_method(method.lexeme.clone())
+                } else {
+                    None
+                }
+            })
+            .and_then(|f| {
+                object.with(|object_lit| {
+                    if let Literal::Instance(instance) = object_lit {
+                        Some((f, instance.clone()))
+                    } else {
+                        None
+                    }
+                })
+            })
+            .ok_or(Error::Eval {
+                token: method.clone(),
+                message: format!("Undefined property '{}' on 'super'", method.lexeme),
+            })
+            .map(|(method_func, object_inst)| {
+                method_func.with(|func| func.bind(object_inst.clone()))
+            })?;
+
+        Ok(Literal::Function(method_func.into()).into())
+    } else {
+        Err(Error::Eval {
+            token: keyword.clone(),
+            message: "Could not find 'super'".to_string(),
+        })
+    }
 }
 
 fn execute_if(

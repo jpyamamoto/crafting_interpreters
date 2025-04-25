@@ -337,10 +337,9 @@ fn identifier(state: &mut ScannerState) {
     }
 
     let text: String = substring(&state.source, state.start, state.current);
-    let token_type: TokenType = KEYWORDS
+    let token_type: TokenType = *KEYWORDS
         .get(&text as &str)
-        .unwrap_or(&TokenType::Identifier)
-        .clone();
+        .unwrap_or(&TokenType::Identifier);
     add_token(state, token_type, Some(InternalValue::Text(text)));
 }
 

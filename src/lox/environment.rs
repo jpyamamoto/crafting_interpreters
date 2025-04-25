@@ -19,6 +19,10 @@ impl Environment {
         .into()
     }
 
+    pub fn enclosing(&self) -> Option<Environment> {
+        self.0.enclosing.clone()
+    }
+
     pub fn with_parent(parent: Environment) -> Self {
         Env {
             values: RefCell::new(HashMap::new()),

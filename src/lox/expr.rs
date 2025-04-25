@@ -23,6 +23,7 @@ pub enum Expr {
     Variable(Token),
     Assign(Token, Box<Expr>),
     This(Token),
+    Super(Token, Token),
 }
 
 #[derive(Debug, Clone, Eq)]
@@ -81,6 +82,7 @@ impl Display for Expr {
                 write!(f, "{}({})", callee, args_str)
             }
             Expr::This(_keyword) => write!(f, "this"),
+            Expr::Super(_, _) => write!(f, "super"),
         }
     }
 }

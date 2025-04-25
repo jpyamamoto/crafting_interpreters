@@ -10,11 +10,11 @@ struct ParserState {
 }
 
 impl ParserState {
-    fn check(&self, token_type: &TokenType) -> bool {
+    fn check(&self, token_type: TokenType) -> bool {
         if self.is_at_end() {
             false
         } else {
-            self.peek().type_token == *token_type
+            self.peek().type_token == token_type
         }
     }
 
@@ -95,18 +95,18 @@ fn function_declaration(state: &mut ParserState, kind: &str) -> Result<Stmt, Err
 fn function(state: &mut ParserState, kind: &str) -> Result<FuncContainer, Error> {
     let name = consume(
         state,
-        &TokenType::Identifier,
+        TokenType::Identifier,
         &format!("Expect {} name.", kind),
     )?;
     consume(
         state,
-        &TokenType::LeftParen,
+        TokenType::LeftParen,
         &format!("Expect '(' after {} name.", kind),
     )?;
 
     let mut parameters: Vec<Token> = vec![];
 
-    if !state.check(&TokenType::RightParen) {
+    if !state.check(TokenType::RightParen) {
         loop {
             if parameters.len() >= 255 {
                 let err = Error::Report {
@@ -117,7 +117,7 @@ fn function(state: &mut ParserState, kind: &str) -> Result<FuncContainer, Error>
                 return Err(err);
             }
 
-            let param = consume(state, &TokenType::Identifier, "Expect parameter name.")?;
+            let param = consume(state, TokenType::Identifier, "Expect parameter name.")?;
             parameters.push(param);
 
             if !match_any_token(state, &[TokenType::Comma]) {
@@ -126,14 +126,10 @@ fn function(state: &mut ParserState, kind: &str) -> Result<FuncContainer, Error>
         }
     }
 
+    consume(state, TokenType::RightParen, "Expect ')' after parameters.")?;
     consume(
         state,
-        &TokenType::RightParen,
-        "Expect ')' after parameters.",
-    )?;
-    consume(
-        state,
-        &TokenType::LeftBrace,
+        TokenType::LeftBrace,
         &format!("Expect '{{' before {} body.", kind),
     )?;
     let body: Vec<Stmt> = block(state)?;
@@ -147,7 +143,7 @@ fn function(state: &mut ParserState, kind: &str) -> Result<FuncContainer, Error>
 }
 
 fn var_declaration(state: &mut ParserState) -> Result<Stmt, Error> {
-    let name: Token = consume(state, &TokenType::Identifier, "Expect variable name.")?;
+    let name: Token = consume(state, TokenType::Identifier, "Expect variable name.")?;
 
     let initializer = if match_any_token(state, &[TokenType::Equal]) {
         let expr = expression(state)?;
@@ -158,7 +154,7 @@ fn var_declaration(state: &mut ParserState) -> Result<Stmt, Error> {
 
     consume(
         state,
-        &TokenType::Semicolon,
+        TokenType::Semicolon,
         "Expect ';' after variable declaration.",
     )?;
 
@@ -166,27 +162,27 @@ fn var_declaration(state: &mut ParserState) -> Result<Stmt, Error> {
 }
 
 fn class_declaration(state: &mut ParserState) -> Result<Stmt, Error> {
-    let name = consume(state, &TokenType::Identifier, "Expect class name.")?;
-    consume(
-        state,
-        &TokenType::LeftBrace,
-        "Expect '{' before class body.",
-    )?;
+    let name = consume(state, TokenType::Identifier, "Expect class name.")?;
+
+    let superclass = if match_any_token(state, &[TokenType::Less]) {
+        consume(state, TokenType::Identifier, "Expect superclass name.")?;
+        Some(state.previous().clone())
+    } else {
+        None
+    };
+
+    consume(state, TokenType::LeftBrace, "Expect '{' before class body.")?;
 
     let mut methods: Vec<FuncContainer> = vec![];
 
-    while !state.check(&TokenType::RightBrace) && !state.is_at_end() {
+    while !state.check(TokenType::RightBrace) && !state.is_at_end() {
         let func = function(state, "method")?;
         methods.push(func);
     }
 
-    consume(
-        state,
-        &TokenType::RightBrace,
-        "Expect '}' after class body.",
-    )?;
+    consume(state, TokenType::RightBrace, "Expect '}' after class body.")?;
 
-    Ok(Stmt::Class(name, methods))
+    Ok(Stmt::Class(name, methods, superclass))
 }
 
 fn statement(state: &mut ParserState) -> Result<Stmt, Error> {
@@ -209,17 +205,17 @@ fn statement(state: &mut ParserState) -> Result<Stmt, Error> {
 }
 
 fn while_statement(state: &mut ParserState) -> Result<Stmt, Error> {
-    consume(state, &TokenType::LeftParen, "Expect '(' after while.")?;
+    consume(state, TokenType::LeftParen, "Expect '(' after while.")?;
     let condition = expression(state)?;
 
-    consume(state, &TokenType::RightParen, "Expect ')' after condition.")?;
+    consume(state, TokenType::RightParen, "Expect ')' after condition.")?;
     let body = statement(state)?;
 
     Ok(Stmt::While(Box::new(condition), Box::new(body)))
 }
 
 fn for_statement(state: &mut ParserState) -> Result<Stmt, Error> {
-    consume(state, &TokenType::LeftParen, "Expect '(' after 'for'.")?;
+    consume(state, TokenType::LeftParen, "Expect '(' after 'for'.")?;
 
     let initializer = if match_any_token(state, &[TokenType::Semicolon]) {
         None
@@ -229,7 +225,7 @@ fn for_statement(state: &mut ParserState) -> Result<Stmt, Error> {
         Some(expression_statement(state)?)
     };
 
-    let condition = if !state.check(&TokenType::Semicolon) {
+    let condition = if !state.check(TokenType::Semicolon) {
         expression(state)?
     } else {
         Expr::Atomic(Literal::True.into())
@@ -237,11 +233,11 @@ fn for_statement(state: &mut ParserState) -> Result<Stmt, Error> {
 
     consume(
         state,
-        &TokenType::Semicolon,
+        TokenType::Semicolon,
         "Expect ';' after loop condition.",
     )?;
 
-    let increment = if !state.check(&TokenType::RightParen) {
+    let increment = if !state.check(TokenType::RightParen) {
         Some(expression(state)?)
     } else {
         None
@@ -249,7 +245,7 @@ fn for_statement(state: &mut ParserState) -> Result<Stmt, Error> {
 
     consume(
         state,
-        &TokenType::RightParen,
+        TokenType::RightParen,
         "Expect ')' after for clauses.",
     )?;
 
@@ -269,11 +265,11 @@ fn for_statement(state: &mut ParserState) -> Result<Stmt, Error> {
 }
 
 fn if_statement(state: &mut ParserState) -> Result<Stmt, Error> {
-    consume(state, &TokenType::LeftParen, "Expect '(' after 'if'.")?;
+    consume(state, TokenType::LeftParen, "Expect '(' after 'if'.")?;
     let condition = expression(state)?;
     consume(
         state,
-        &TokenType::RightParen,
+        TokenType::RightParen,
         "Expect ')' after 'if' condition.",
     )?;
 
@@ -295,7 +291,7 @@ fn if_statement(state: &mut ParserState) -> Result<Stmt, Error> {
 fn block(state: &mut ParserState) -> Result<Vec<Stmt>, Error> {
     let mut statements: Vec<Stmt> = vec![];
 
-    while !state.check(&TokenType::RightBrace) && !state.is_at_end() {
+    while !state.check(TokenType::RightBrace) && !state.is_at_end() {
         let decl = declaration(state)?;
 
         if let Some(valid_decl) = decl {
@@ -303,14 +299,14 @@ fn block(state: &mut ParserState) -> Result<Vec<Stmt>, Error> {
         }
     }
 
-    consume(state, &TokenType::RightBrace, "Expect '}' after block.")?;
+    consume(state, TokenType::RightBrace, "Expect '}' after block.")?;
     Ok(statements)
 }
 
 fn print_statement(state: &mut ParserState) -> Result<Stmt, Error> {
     let value: Expr = expression(state)?;
 
-    consume(state, &TokenType::Semicolon, "Expect ';' after value.")?;
+    consume(state, TokenType::Semicolon, "Expect ';' after value.")?;
 
     Ok(Stmt::Print(Box::new(value)))
 }
@@ -318,7 +314,7 @@ fn print_statement(state: &mut ParserState) -> Result<Stmt, Error> {
 fn return_statement(state: &mut ParserState) -> Result<Stmt, Error> {
     let keyword = state.previous().to_owned();
 
-    let value = if !state.check(&TokenType::Semicolon) {
+    let value = if !state.check(TokenType::Semicolon) {
         Some(Box::new(expression(state)?))
     } else {
         None
@@ -326,7 +322,7 @@ fn return_statement(state: &mut ParserState) -> Result<Stmt, Error> {
 
     consume(
         state,
-        &TokenType::Semicolon,
+        TokenType::Semicolon,
         "Expect ';' after return value.",
     )?;
 
@@ -336,7 +332,7 @@ fn return_statement(state: &mut ParserState) -> Result<Stmt, Error> {
 fn expression_statement(state: &mut ParserState) -> Result<Stmt, Error> {
     let expr: Expr = expression(state)?;
 
-    consume(state, &TokenType::Semicolon, "Expect ';' after expression.")?;
+    consume(state, TokenType::Semicolon, "Expect ';' after expression.")?;
 
     Ok(Stmt::Expr(Box::new(expr)))
 }
@@ -386,7 +382,7 @@ fn ternary(state: &mut ParserState) -> Result<Expr, Error> {
         let then_expr = ternary(state)?;
         let _ = consume(
             state,
-            &TokenType::Colon,
+            TokenType::Colon,
             "Expected ':' in ternary expression.",
         );
         let else_expr = ternary(state)?;
@@ -499,7 +495,7 @@ fn call(state: &mut ParserState) -> Result<Expr, Error> {
         } else if match_any_token(state, &[TokenType::Dot]) {
             let name = consume(
                 state,
-                &TokenType::Identifier,
+                TokenType::Identifier,
                 "Expect property name after '.'.",
             )?;
             expr = Expr::Get(Box::new(expr), name);
@@ -512,7 +508,7 @@ fn call(state: &mut ParserState) -> Result<Expr, Error> {
 fn finish_call(state: &mut ParserState, callee: Expr) -> Result<Expr, Error> {
     let mut arguments: Vec<Expr> = vec![];
 
-    if !state.check(&TokenType::RightParen) {
+    if !state.check(TokenType::RightParen) {
         loop {
             if arguments.len() >= 255 {
                 let err = Error::Report {
@@ -533,7 +529,7 @@ fn finish_call(state: &mut ParserState, callee: Expr) -> Result<Expr, Error> {
         }
     };
 
-    let paren = consume(state, &TokenType::RightParen, "Expect ')' after arguments.")?;
+    let paren = consume(state, TokenType::RightParen, "Expect ')' after arguments.")?;
     Ok(Expr::Call(Box::new(callee), arguments, paren))
 }
 
@@ -552,6 +548,17 @@ fn primary(state: &mut ParserState) -> Result<Expr, Error> {
         return Ok(Expr::Atomic(prev_lit.into()));
     }
 
+    if match_any_token(state, &[TokenType::Super]) {
+        let keyword = state.previous().to_owned();
+        consume(state, TokenType::Dot, "Expect '.' after 'super'.")?;
+        let method = consume(
+            state,
+            TokenType::Identifier,
+            "Expect superclass method name.",
+        )?;
+        return Ok(Expr::Super(keyword, method));
+    }
+
     if match_any_token(state, &[TokenType::This]) {
         let keyword = state.previous().to_owned();
         return Ok(Expr::This(keyword));
@@ -564,11 +571,7 @@ fn primary(state: &mut ParserState) -> Result<Expr, Error> {
 
     if match_any_token(state, &[TokenType::LeftParen]) {
         let expr = expression(state)?;
-        consume(
-            state,
-            &TokenType::RightParen,
-            "Expect ')' after expression.",
-        )?;
+        consume(state, TokenType::RightParen, "Expect ')' after expression.")?;
         return Ok(Expr::Grouping(Box::new(expr)));
     }
 
@@ -607,7 +610,7 @@ fn primary(state: &mut ParserState) -> Result<Expr, Error> {
 
 fn match_any_token(state: &mut ParserState, types: &[TokenType]) -> bool {
     for token_type in types {
-        if state.check(token_type) {
+        if state.check(token_type.to_owned()) {
             state.advance();
             return true;
         }
@@ -616,7 +619,7 @@ fn match_any_token(state: &mut ParserState, types: &[TokenType]) -> bool {
     false
 }
 
-fn consume(state: &mut ParserState, token_type: &TokenType, message: &str) -> Result<Token, Error> {
+fn consume(state: &mut ParserState, token_type: TokenType, message: &str) -> Result<Token, Error> {
     if state.check(token_type) {
         return Ok(state.advance().clone());
     }

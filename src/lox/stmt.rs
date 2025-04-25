@@ -18,7 +18,7 @@ pub enum Stmt {
     If(Box<Expr>, Box<Stmt>, Option<Box<Stmt>>),
     While(Box<Expr>, Box<Stmt>),
     Function(FuncContainer),
-    Class(Token, Vec<FuncContainer>),
+    Class(Token, Vec<FuncContainer>, Option<Token>),
 }
 
 impl Display for Stmt {
@@ -71,8 +71,11 @@ impl Display for Stmt {
                 block_str.push('}');
                 write!(f, "{}({}){}", name.lexeme, params_str, block_str)
             }
-            Stmt::Class(name, _) => {
+            Stmt::Class(name, _, None) => {
                 write!(f, "class {} {{}}", name.lexeme)
+            }
+            Stmt::Class(name, _, Some(superclass)) => {
+                write!(f, "class {} < {} {{}}", name.lexeme, superclass.lexeme)
             }
         }
     }

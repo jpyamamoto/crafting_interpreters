@@ -22,6 +22,7 @@ enum FunctionType {
 enum ClassType {
     None,
     Class,
+    Subclass,
 }
 
 struct State {
@@ -112,12 +113,32 @@ fn resolve_stmt(statement: &Stmt, state: &mut State) -> Result<(), Error> {
 
             Ok(())
         }
-        Stmt::Class(name, methods) => {
+        Stmt::Class(name, methods, superclass) => {
             let enclosing_class = state.current_class;
             state.current_class = ClassType::Class;
 
             declare(name, state)?;
             define(name, state);
+
+            if let Some(superclass_token) = superclass {
+                if name.lexeme == superclass_token.lexeme {
+                    return Err(Error::Report {
+                        token: superclass_token.clone(),
+                        message: "A class can't inherit from itself.".to_string(),
+                    });
+                }
+
+                state.current_class = ClassType::Subclass;
+
+                resolve_expr(&Expr::Variable(superclass_token.clone()), state)?;
+            }
+
+            if superclass.is_some() {
+                begin_scope(state);
+                if let Some(last_scope) = state.scopes.last_mut() {
+                    last_scope.insert("super".to_string(), true);
+                }
+            }
 
             begin_scope(state);
 
@@ -135,6 +156,10 @@ fn resolve_stmt(statement: &Stmt, state: &mut State) -> Result<(), Error> {
             }
 
             end_scope(state);
+
+            if superclass.is_some() {
+                end_scope(state);
+            }
 
             state.current_class = enclosing_class;
 
@@ -206,6 +231,17 @@ fn resolve_expr(expr: &Expr, state: &mut State) -> Result<(), Error> {
                 resolve_local(token, state)
             }
         }
+        Expr::Super(keyword, _) => match state.current_class {
+            ClassType::None => Err(Error::Report {
+                token: keyword.clone(),
+                message: "Can't use 'super' outside of a class.".to_string(),
+            }),
+            ClassType::Class => Err(Error::Report {
+                token: keyword.clone(),
+                message: "Can't use 'super' in a class with no superclass.".to_string(),
+            }),
+            ClassType::Subclass => resolve_local(keyword, state),
+        },
     }
 }
 
